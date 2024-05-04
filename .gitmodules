@@ -1,0 +1,6 @@
+[submodule "cedilla"]
+	path = cedilla
+	url = https://gitlab.com/hatsya/open-source/cedilla.git
+[submodule "cpads"]
+	path = cpads
+	url = https://gitlab.com/hatsya/open-source/cpads.git
