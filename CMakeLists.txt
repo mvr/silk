@@ -18,4 +18,7 @@ endif()
 
 add_subdirectory(cedilla)
 
+include_directories("cpads/include")
 include_directories("include")
+
+add_subdirectory(test)

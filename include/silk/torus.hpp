@@ -1,4 +1,4 @@
-#include "core.hpp"
+#include <cpads/core.hpp>
 
 namespace kc {
 
