@@ -16,6 +16,20 @@ __global__ void torus_shift_kernel(const uint4 *src, uint4 *dst) {
 }
 
 
+__global__ void plane_shift_kernel(const uint4 *src, uint4 *dst) {
+
+    uint4 a = src[blockIdx.x * 32 + threadIdx.x];
+    uint4 b;
+
+    b.x = kc::shift_plane<false,  1>(a.x);
+    b.y = kc::shift_plane<true,   1>(a.y);
+    b.z = kc::shift_plane<false, -1>(a.z);
+    b.w = kc::shift_plane<true,  -1>(a.w);
+
+    dst[blockIdx.x * 32 + threadIdx.x] = b;
+}
+
+
 void check_shift(uint32_t* h_a, uint32_t* h_b, int x, int y) {
 
     uint64_t a[64];
@@ -36,10 +50,53 @@ void check_shift(uint32_t* h_a, uint32_t* h_b, int x, int y) {
 }
 
 
+TEST(Plane, Shift) {
+
+    constexpr int n = 4096;
+    uint4* d_a;
+    uint4* d_b;
+    uint32_t* h_a;
+    uint32_t* h_b;
+
+    cudaMalloc((void**) &d_a, n);
+    cudaMalloc((void**) &d_b, n);
+    cudaMallocHost((void**) &h_a, n);
+    cudaMallocHost((void**) &h_b, n);
+
+    hh::PRNG pcg(1, 2, 3);
+
+    for (int i = 0; i < (n >> 2); i++) {
+        // generate some random data
+        h_a[i] = pcg.generate();
+    }
+
+    cudaMemcpy(d_a, h_a, n, cudaMemcpyHostToDevice);
+    plane_shift_kernel<<<(n / 512), 32>>>(d_a, d_b);
+    cudaMemcpy(h_b, d_b, n, cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < (n >> 2); i += 128) {
+        for (int j = 0; j < 32; j++) {
+            EXPECT_EQ(h_b[i + 4*j + 0], h_a[i + 4*j + 0] << 1);
+            EXPECT_EQ(h_b[i + 4*j + 2], h_a[i + 4*j + 2] >> 1);
+            uint32_t c = 0;
+            if (j >= 1) { c = h_a[i + 4*j + 1 - 4]; }
+            EXPECT_EQ(h_b[i + 4*j + 1], c);
+            uint32_t d = 0;
+            if (j < 31) { d = h_a[i + 4*j + 3 + 4]; }
+            EXPECT_EQ(h_b[i + 4*j + 3], d);
+        }
+    }
+
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFreeHost(h_a);
+    cudaFreeHost(h_b);
+}
+
+
 TEST(Torus, Shift) {
 
     constexpr int n = 512 * 64 * 64;
-
     uint4* d_a;
     uint4* d_b;
     uint32_t* h_a;
@@ -72,5 +129,4 @@ TEST(Torus, Shift) {
     cudaFree(d_b);
     cudaFreeHost(h_a);
     cudaFreeHost(h_b);
-
 }

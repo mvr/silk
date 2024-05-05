@@ -57,4 +57,31 @@ _DI_ uint4 shift_torus(uint4 a, int i, int j) {
 
 }
 
+template<bool direction, int amount>
+_DI_ uint32_t shift_plane(uint32_t x) {
+
+    // handle degenerate cases:
+    if constexpr (amount == 0) { return x; }
+    if constexpr ((amount >= 32) || (amount <= -32)) { return 0; }
+
+    if constexpr (direction) {
+        // vertical
+        int lid = threadIdx.x & 31;
+        if constexpr (amount > 0) {
+            uint32_t y = hh::shuffle_up_32(x, amount);
+            return (lid >= amount) ? y : 0;
+        } else {
+            uint32_t y = hh::shuffle_down_32(x, -amount);
+            return (lid < 32 + amount) ? y : 0;
+        }
+    } else {
+        // horizontal
+        if constexpr (amount > 0) {
+            return (x << amount);
+        } else {
+            return (x >> (-amount));
+        }
+    }
+}
+
 }
