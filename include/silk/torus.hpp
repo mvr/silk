@@ -19,11 +19,11 @@ namespace kc {
  * Within each 32x32 square, the kth thread in the warp stores
  * the kth row of the square as a uint32.
  */
-_DI_ uint4 shift_torus(uint4 a, int i, int j) {
+_DI_ void shift_torus_inplace(uint32_t &x, uint32_t &y, uint32_t &z, uint32_t &w, int i, int j) {
 
     // pack elements:
-    uint64_t xy = (((uint64_t) a.y) << 32) | a.x;
-    uint64_t zw = (((uint64_t) a.w) << 32) | a.z;
+    uint64_t xy = (((uint64_t) y) << 32) | x;
+    uint64_t zw = (((uint64_t) w) << 32) | z;
 
     {
         // vertical shift:
@@ -42,13 +42,19 @@ _DI_ uint4 shift_torus(uint4 a, int i, int j) {
         zw = (zw << ls) | (zw >> rs);
     }
 
-    uint4 b;
-    b.x = xy;
-    b.y = xy >> 32;
-    b.z = zw;
-    b.w = zw >> 32;
+    // unpack elements:
+    x = xy;
+    y = xy >> 32;
+    z = zw;
+    w = zw >> 32;
+}
 
+_DI_ uint4 shift_torus(uint4 a, int i, int j) {
+
+    uint4 b = a;
+    shift_torus_inplace(b.x, b.y, b.z, b.w, i, j);
     return b;
+
 }
 
 }

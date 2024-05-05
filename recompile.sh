@@ -33,3 +33,5 @@ cd build
 
 cmake ..
 make -j 8
+
+'test/gpu/gpu_unit_test'
