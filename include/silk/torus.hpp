@@ -1,3 +1,4 @@
+#pragma once
 #include <cpads/core.hpp>
 
 namespace kc {
