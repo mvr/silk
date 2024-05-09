@@ -68,14 +68,14 @@ template<bool Vertical> _DI_ bool apply_domino_rule(uint32_t &ad0, uint32_t &ad1
     uint32_t fd2 = apply_maj3(fdla, fdra, forced_dead);
     uint32_t fd1 = apply_xor3(fdla, fdra, forced_dead);
 
-    {
-        // determine which counts of cells are excluded
-        // in the row 'xax':
-        uint32_t n0 = fl1;
-        uint32_t n1 = fl2 | (fd2 & fd1);
-        uint32_t n2 = fd2 | (fl2 & fl1);
-        uint32_t n3 = fd1;
+    // determine which counts of cells are excluded
+    // in the row 'xax':
+    uint32_t n0 = fl1 | fl2;
+    uint32_t n1 = fl2 | (fd2 & fd1);
+    uint32_t n2 = fd2 | (fl2 & fl1);
+    uint32_t n3 = fd1 | fd2;
 
+    {
         // communicate vertically to get the excluded
         // counts in the two rows of 'n' cells:
         an0 = kc::shift_plane<Vertical,  1>(n0);
@@ -362,10 +362,10 @@ template<bool Vertical> _DI_ bool apply_domino_rule(uint32_t &ad0, uint32_t &ad1
 
     {
         // determine which combinations have been disproved:
-        uint32_t gn0 = kc::shift_plane<Vertical, -1>(gan0) | kc::shift_plane<Vertical, 2>(gbn0);
-        uint32_t gn1 = kc::shift_plane<Vertical, -1>(gan1) | kc::shift_plane<Vertical, 2>(gbn1);
-        uint32_t gn2 = kc::shift_plane<Vertical, -1>(gan2) | kc::shift_plane<Vertical, 2>(gbn2);
-        uint32_t gn3 = kc::shift_plane<Vertical, -1>(gan3) | kc::shift_plane<Vertical, 2>(gbn3);
+        uint32_t gn0 = n0 | kc::shift_plane<Vertical, -1>(gan0) | kc::shift_plane<Vertical, 2>(gbn0);
+        uint32_t gn1 = n1 | kc::shift_plane<Vertical, -1>(gan1) | kc::shift_plane<Vertical, 2>(gbn1);
+        uint32_t gn2 = n2 | kc::shift_plane<Vertical, -1>(gan2) | kc::shift_plane<Vertical, 2>(gbn2);
+        uint32_t gn3 = n3 | kc::shift_plane<Vertical, -1>(gan3) | kc::shift_plane<Vertical, 2>(gbn3);
 
         // determine which combinations have been proved:
         uint32_t gf0 = gn1 & gn2 & gn3;
@@ -375,7 +375,7 @@ template<bool Vertical> _DI_ bool apply_domino_rule(uint32_t &ad0, uint32_t &ad1
 
         // determine whether to propagate live/dead to unknown neighbours:
         uint32_t pl = gf3 | (gf2 & fd1) | (gf1 & fd2);
-        uint32_t pd = gf0 | (gf1 & fl2) | (gf2 & fl1);
+        uint32_t pd = gf0 | (gf1 & fl1) | (gf2 & fl2);
         uint32_t turn_live = pl | kc::shift_plane<Horizontal, -1>(pl) | kc::shift_plane<Horizontal, 1>(pl);
         uint32_t turn_dead = pd | kc::shift_plane<Horizontal, -1>(pd) | kc::shift_plane<Horizontal, 1>(pd);
 
