@@ -161,9 +161,9 @@ inline std::vector<T> complete_still_life(const T* constraints, int radius = 4, 
             if (livepop >= 1) {
                 ced.add_clause({-unknown_lits_sorted[deadpop]});
                 lower_bound = deadpop;
-                if (upper_bound >= lower_bound + 2) {
-                    middle_bound = (upper_bound + lower_bound) >> 1;
-                    ced.cnf.assume(-unknown_lits_sorted[middle_bound]);
+                if (upper_bound >= lower_bound + 3) {
+                    middle_bound = (upper_bound + lower_bound + 1) >> 1;
+                    ced.cnf.assume(-unknown_lits_sorted[middle_bound - 1]);
                 }
             } else {
                 ced.add_clause({1});
