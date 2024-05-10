@@ -50,6 +50,14 @@ void check_shift(uint32_t* h_a, uint32_t* h_b, int x, int y) {
 }
 
 
+TEST(Plane, GetMiddle) {
+
+    EXPECT_EQ(kc::get_middle(0x00ffff00u), ((uint32_t) 0));
+    EXPECT_EQ(kc::get_middle(0x0ffff000u), ((uint32_t) 4));
+
+}
+
+
 TEST(Plane, Shift) {
 
     constexpr int n = 4096;

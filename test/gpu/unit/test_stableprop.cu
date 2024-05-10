@@ -154,6 +154,32 @@ std::vector<uint32_t> make_random_sl(uint64_t seed, double prob = 0.0, uint32_t*
 }
 
 
+TEST(CompleteStill, Minimise) {
+
+    std::vector<uint64_t> known_live = {0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 3350888185856ull, 11448882298880ull, 27924104740864ull, 3350892380160ull, 13962052370432ull, 58082137997312ull, 3350892380160ull, 29041068867584ull, 27924104740864ull, 3350892380160ull, 49146424459264ull, 58082137997312ull, 3350892380160ull, 29041068867584ull, 27924104740864ull, 3350892380160ull, 49146424459264ull, 58082137735168ull, 3350892380160ull, 29041068867584ull, 10331918172160ull, 1151869124608ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull};
+
+    std::vector<uint64_t> known_dead = {0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 5445196447744ull, 6143302696960ull, 7260266823680ull, 31833479446528ull, 21222319456256ull, 12286605918208ull, 67017851535360ull, 41327675047936ull, 42444639174656ull, 67017851535360ull, 21222319456256ull, 12286605918208ull, 67017851535360ull, 41327675047936ull, 42444639174656ull, 67017851535360ull, 21222319456256ull, 12286605918208ull, 67017851273216ull, 6143302696960ull, 7260266823680ull, 1047152033792ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull};
+
+    auto constraints = kc::expand_constraints<uint64_t>(&(known_live[0]), &(known_dead[0]));
+
+    auto solution = kc::complete_still_life<uint64_t>(&(constraints[0]), 4, true);
+
+    int population = 0;
+
+    for (int y = 0; y < 64; y++) {
+        population += hh::popc64(solution[y]);
+        for (int x = 0; x < 64; x++) {
+            std::cout << (((solution[y] >> x) & 1) ? '*' : '.');
+        }
+        std::cout << std::endl;
+    }
+    std::cout << std::endl;
+
+    std::cout << "population = " << population << std::endl;
+    EXPECT_EQ(population, 306);
+}
+
+
 TEST(CompleteStill, Random) {
 
     int N = 100;

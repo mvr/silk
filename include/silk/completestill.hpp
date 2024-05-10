@@ -25,18 +25,32 @@ inline std::vector<T> expand_constraints(const T* known_live, const T* known_dea
 }
 
 template<typename T>
-inline std::vector<T> complete_still_life(const T* constraints) {
+inline std::vector<T> complete_still_life(const T* constraints, int radius = 4, bool minimise = false) {
 
     // grid size:
     int H = 8 * sizeof(T);
 
     std::vector<std::vector<int32_t>> vars(H);
 
+    std::vector<T> c1(H);
+    std::vector<T> c2(H);
+
+    for (int i = 0; i < H; i++) { c1[i] = constraints[i]; }
+    for (int j = 0; j < radius; j++) {
+        for (int i = 0; i < H; i++) {
+            c2[i] = c1[i] | (c1[i] << 1) | (c1[i] >> (H-1)) | (c1[i] >> 1) | (c1[i] << (H-1));
+        }
+        for (int i = 0; i < H; i++) {
+            c1[i] = c2[i] | c2[(i + 1) & (H - 1)] | c2[(i - 1) & (H - 1)];
+        }
+    }
+
     // determine known cells:
     for (int i = 0; i < H; i++) {
         T known_live = constraints[i] & constraints[i + H] & constraints[i + 2 * H];
         T known_dead = constraints[i + 3 * H] & constraints[i + 4 * H];
         known_live &= constraints[i + 5 * H] & constraints[i + 6 * H] & constraints[i + 7 * H];
+        known_dead |= (~c1[i]);
 
         for (int j = 0; j < H; j++) {
             int32_t var = 0;
@@ -52,17 +66,23 @@ inline std::vector<T> complete_still_life(const T* constraints) {
     // so that numerically proximate variables correspond to spatially
     // proximate cells:
     std::vector<uint64_t> locations;
+    std::vector<int32_t> unknown_lits;
     for (int p = 0; p < H * H; p++) {
         uint64_t z = kc::hilbert_d2xy(p);
         int32_t y = ((int32_t) (z >> 32));
         int32_t x = ((int32_t) (z & 0xffffffffu));
 
         if (vars[y][x] == 0) {
-            vars[y][x] = ced.new_literal(true, false);
+            vars[y][x] = ced.new_literal(true, minimise);
             locations.push_back(z);
+            unknown_lits.push_back(vars[y][x]);
             // std::cout << "cell (" << y << ", " << x << ") unknown" << std::endl;
         }
     }
+
+    std::vector<int32_t> unknown_lits_sorted;
+
+    if (minimise) { unknown_lits_sorted = ced.cnf.sort_booleans(unknown_lits); }
 
     // add constraints:
     for (int y = 0; y < H; y++) {
@@ -110,6 +130,21 @@ inline std::vector<T> complete_still_life(const T* constraints) {
             vars[y][x] = (solution[k] > 0) ? -1 : 1;
         }
         has_solution = true;
+        if (minimise) {
+            int livepop = 0;
+            int deadpop = 0;
+            for (size_t k = 0; k < solution.size(); k++) {
+                if (solution[k] > 0) {
+                    livepop += 1;
+                } else {
+                    deadpop += 1;
+                }
+            }
+            // std::cout << "live population " << livepop << "; dead population " << deadpop << std::endl;
+            if (livepop >= 1) {
+                ced.add_clause({-unknown_lits_sorted[deadpop]});
+            }
+        }
     });
 
     std::vector<T> solution;

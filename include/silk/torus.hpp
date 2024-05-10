@@ -85,4 +85,24 @@ _DI_ uint32_t shift_plane(uint32_t x) {
     }
 }
 
+_HD_ uint32_t get_middle(uint32_t x) {
+    uint32_t bias = hh::ffs32(x) - hh::clz32(x);
+    return (bias >> 1);
 }
+
+_DI_ uint32_t get_middle_horizontal(uint32_t x) {
+    uint32_t y = x;
+    y |= hh::shuffle_xor_32(y, 1);
+    y |= hh::shuffle_xor_32(y, 2);
+    y |= hh::shuffle_xor_32(y, 4);
+    y |= hh::shuffle_xor_32(y, 8);
+    y |= hh::shuffle_xor_32(y, 16);
+    return get_middle(y);
+}
+
+_DI_ uint32_t get_middle_vertical(uint32_t x) {
+    uint32_t y = hh::ballot_32(x != 0);
+    return get_middle(y);
+}
+
+} // namespace kc
