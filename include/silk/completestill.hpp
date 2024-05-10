@@ -122,7 +122,24 @@ inline std::vector<T> complete_still_life(const T* constraints, int radius = 4, 
 
     bool has_solution = false;
 
+    int lower_bound = 0;
+    int upper_bound = locations.size() + 1;
+    int middle_bound = (upper_bound + lower_bound) >> 1;
+
     ced.multisolve([&](const std::vector<int32_t> &solution) {
+
+        if (solution.size() < locations.size()) {
+            // this means that we made an assumption and received no solution.
+            upper_bound = middle_bound;
+
+            if (upper_bound >= lower_bound + 2) {
+                middle_bound = (upper_bound + lower_bound) >> 1;
+                ced.cnf.assume(-unknown_lits_sorted[middle_bound]);
+            }
+
+            return;
+        }
+
         for (size_t k = 0; k < solution.size(); k++) {
             uint64_t z = locations[k];
             int32_t y = ((int32_t) (z >> 32));
@@ -143,6 +160,13 @@ inline std::vector<T> complete_still_life(const T* constraints, int radius = 4, 
             // std::cout << "live population " << livepop << "; dead population " << deadpop << std::endl;
             if (livepop >= 1) {
                 ced.add_clause({-unknown_lits_sorted[deadpop]});
+                lower_bound = deadpop;
+                if (upper_bound >= lower_bound + 2) {
+                    middle_bound = (upper_bound + lower_bound) >> 1;
+                    ced.cnf.assume(-unknown_lits_sorted[middle_bound]);
+                }
+            } else {
+                ced.add_clause({1});
             }
         }
     });
