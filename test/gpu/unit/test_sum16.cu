@@ -26,12 +26,14 @@ void check_sum16(uint32_t* input, uint32_t* output) {
                 }
             }
 
+            expected = hh::min(expected, 15); // 4-bit saturating counter
+
             actual +=  (output[y * 4    ] >> x) & 1;
             actual += ((output[y * 4 + 1] >> x) & 1) * 2;
             actual += ((output[y * 4 + 2] >> x) & 1) * 4;
             actual += ((output[y * 4 + 3] >> x) & 1) * 8;
 
-            EXPECT_EQ(actual, expected & 15);
+            EXPECT_EQ(actual, expected);
         }
     }
 }

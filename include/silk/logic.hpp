@@ -55,11 +55,11 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
 
 
 /**
- * Returns the mod-16 sum of the 16 booleans obtained by taking the
+ * Returns the sum of the 16 booleans obtained by taking the
  * values of a and b on each of the 8 neighbours. For our application
  * (computing lower and upper bounds on the change, versus the stable
- * state, of the number of live cells in the neighbourhood) the change
- * is bounded in [-6, +8] so we only need to know the bound mod 16.
+ * state, of the number of live cells in the neighbourhood) this can
+ * saturate at 15 without any bad consequences.
  */
 _DI_ uint4 sum16(uint32_t a, uint32_t b) {
 
@@ -94,11 +94,8 @@ _DI_ uint4 sum16(uint32_t a, uint32_t b) {
     uint32_t r2 = apply_maj3(p1u, p1d, o1);
     uint32_t r1 = apply_xor3(p1u, p1d, o1);
 
-    uint4 res;
-
     // the sum of the neighbourhood is in {o2u, p2u, o2d, p2d, o2, q2, r2, q1, r1}
     // compute lowest bit and carry:
-    res.x = q1 ^ r1;
     uint32_t s2 = q1 & r1;
     uint32_t t4 = apply_maj3(o2u, o2d, o2);
     uint32_t t2 = apply_xor3(o2u, o2d, o2);
@@ -107,17 +104,22 @@ _DI_ uint4 sum16(uint32_t a, uint32_t b) {
     uint32_t v4 = apply_maj3(r2, s2, t2);
     uint32_t v2 = apply_xor3(r2, s2, t2);
 
-    // the sum of the neighbourhood is in {t4, u4, v4, u2, v2, res.x}
+    // the sum of the neighbourhood is in {t4, u4, v4, u2, v2, q1 ^ r1}
     // compute next bit and carry:
-    res.y = u2 ^ v2;
     uint32_t w4 = u2 & v2;
     uint32_t x8 = apply_maj3(t4, u4, v4);
     uint32_t x4 = apply_xor3(t4, u4, v4);
 
-    // the sum of the neighbourhood is in {x8, x4, w4, res.y, res.x}
-    // compute upper two bits:
-    res.z = x4 ^ w4;
-    res.w = x8 ^ (x4 & w4);
+    // the sum of the neighbourhood is in {x8, x4, w4, u2 ^ v2, q1 ^ r1}
+    // determine whether we have overflowed:
+    uint32_t saturated = x8 & x4 & w4;
+
+    // compute result in binary:
+    uint4 res;
+    res.x = (q1 ^ r1) | saturated;
+    res.y = (u2 ^ v2) | saturated;
+    res.z = (x4 ^ w4) | saturated;
+    res.w = x8 | (x4 & w4);
 
     return res;
 }
