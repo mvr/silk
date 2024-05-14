@@ -61,7 +61,16 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
  * state, of the number of live cells in the neighbourhood) this can
  * saturate at 15 without any bad consequences.
  */
-_DI_ uint4 sum16(uint32_t a, uint32_t b) {
+template<bool SubtractOne>
+_DI_ uint4 sum16(uint32_t ia, uint32_t ib) {
+
+    uint32_t a, b;
+
+    if constexpr (SubtractOne) {
+        a = ~ia; b = ~ib;
+    } else {
+        a = ia; b = ib;
+    }
 
     // 4 warp shuffles:
     uint32_t al = kc::shift_plane<true,  1>(a);
@@ -120,6 +129,13 @@ _DI_ uint4 sum16(uint32_t a, uint32_t b) {
     res.y = (u2 ^ v2) | saturated;
     res.z = (x4 ^ w4) | saturated;
     res.w = x8 | (x4 & w4);
+
+    if constexpr (SubtractOne) {
+        res.x = ~res.x;
+        res.y = ~res.y;
+        res.z = ~res.z;
+        res.w = ~res.w;
+    }
 
     return res;
 }

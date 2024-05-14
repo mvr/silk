@@ -91,12 +91,7 @@ _HD_ uint32_t get_middle(uint32_t x) {
 }
 
 _DI_ uint32_t get_middle_horizontal(uint32_t x) {
-    uint32_t y = x;
-    y |= hh::shuffle_xor_32(y, 1);
-    y |= hh::shuffle_xor_32(y, 2);
-    y |= hh::shuffle_xor_32(y, 4);
-    y |= hh::shuffle_xor_32(y, 8);
-    y |= hh::shuffle_xor_32(y, 16);
+    uint32_t y = hh::warp_or(x);
     return get_middle(y);
 }
 
@@ -104,5 +99,40 @@ _DI_ uint32_t get_middle_vertical(uint32_t x) {
     uint32_t y = hh::ballot_32(x != 0);
     return get_middle(y);
 }
+
+_DI_ uint32_t active_to_inactive(uint32_t x, int p) {
+    uint32_t y = x | (-x);
+    return (y << p);
+}
+
+/**
+ * Determine the cells that are forced to be stable based on those
+ * that are known to be unstable, making use of the 
+ */
+_DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, int max_width, int max_height, uint32_t max_pop) {
+
+    uint32_t active = not_stable & ad0;
+    uint32_t active_y = hh::ballot_32(active != 0);
+    uint32_t active_p = hh::warp_add((uint32_t) hh::popc32(active));
+    uint32_t active_x = hh::warp_or(active);
+
+    // determine cells that are too far from the most distant active cell:
+    uint32_t inactive_y = active_to_inactive(active_y, max_height);
+    inactive_y |= hh::brev32(active_to_inactive(hh::brev32(active_y), max_height));
+    uint32_t inactive_x = active_to_inactive(active_x, max_width);
+    inactive_x |= hh::brev32(active_to_inactive(hh::brev32(active_x), max_width));
+    inactive_y = 0 - ((inactive_y >> (threadIdx.x & 31)) & 1);
+
+    // now incorporate the population constraint:
+    uint32_t inactive_p = 0;
+    if (active_p == max_pop) { inactive_p = ~active; }
+    if (active_p >  max_pop) { inactive_p = 0xffffffffu; }
+    uint32_t inactive = inactive_x | inactive_y | inactive_p;
+
+    // everything outside central 28x28 square must be stable:
+    uint32_t border = (((threadIdx.x + 2) & 31) < 4) ? 0xffffffffu : 0xc0000003u;
+    return border | (inactive & ad0);
+}
+
 
 } // namespace kc

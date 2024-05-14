@@ -2,15 +2,16 @@
 #include <cpads/random/prng.hpp>
 #include <gtest/gtest.h>
 
+template<bool SubtractOne>
 __global__ void sum16_kernel(uint4 *x) {
 
     uint4 a = x[blockIdx.x * 32 + threadIdx.x];
-    uint4 b = kc::sum16(a.x, a.y);
+    uint4 b = kc::sum16<SubtractOne>(a.x, a.y);
     x[blockIdx.x * 32 + threadIdx.x] = b;
 
 }
 
-void check_sum16(uint32_t* input, uint32_t* output) {
+void check_sum16(uint32_t* input, uint32_t* output, bool SubtractOne) {
 
     for (int y = 1; y < 31; y++) {
         for (int x = 1; x < 31; x++) {
@@ -26,7 +27,8 @@ void check_sum16(uint32_t* input, uint32_t* output) {
                 }
             }
 
-            expected = hh::min(expected, 15); // 4-bit saturating counter
+            // 4-bit saturating counter
+            expected = hh::min(hh::max(0, expected - SubtractOne), 15);
 
             actual +=  (output[y * 4    ] >> x) & 1;
             actual += ((output[y * 4 + 1] >> x) & 1) * 2;
@@ -38,7 +40,8 @@ void check_sum16(uint32_t* input, uint32_t* output) {
     }
 }
 
-TEST(Sum16, Sum16) {
+template<bool SubtractOne>
+void run_sum16_test() {
 
     int N = 1000;
 
@@ -57,16 +60,19 @@ TEST(Sum16, Sum16) {
     }
 
     cudaMemcpy(device_buffer, input, N << 9, cudaMemcpyHostToDevice);
-    sum16_kernel<<<N, 32>>>(device_buffer);
+    sum16_kernel<SubtractOne><<<N, 32>>>(device_buffer);
     cudaMemcpy(output, device_buffer, N << 9, cudaMemcpyDeviceToHost);
 
     cudaFree(device_buffer);
 
     for (int i = 0; i < N; i++) {
-        check_sum16(input + i * 128, output + i * 128);
+        check_sum16(input + i * 128, output + i * 128, SubtractOne);
     }
 
     cudaFreeHost(input);
     cudaFreeHost(output);
 
 }
+
+TEST(Sum16, Ordinary) { run_sum16_test<false>(); }
+TEST(Sum16, Subtracted) { run_sum16_test<true>(); }
