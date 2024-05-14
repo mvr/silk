@@ -110,7 +110,7 @@ _DI_ uint32_t active_to_inactive(uint32_t x, int p) {
  * that are known to be unstable, making use of the width, height,
  * and population bounds of the active region.
  */
-_DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, int max_width, int max_height, uint32_t max_pop) {
+_DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, uint32_t stator, int max_width, int max_height, uint32_t max_pop) {
 
     // the active region consists of cells adjacent to the catalyst
     // that are not in the stable state:
@@ -132,9 +132,13 @@ _DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, int max_width
     if (active_p >  max_pop) { inactive_p = 0xffffffffu; }
     uint32_t inactive = inactive_x | inactive_y | inactive_p;
 
+    return stator | (inactive & ad0);
+}
+
+_DI_ uint32_t get_border() {
     // everything outside central 28x28 square must be stable:
     uint32_t border = (((threadIdx.x + 2) & 31) < 4) ? 0xffffffffu : 0xc0000003u;
-    return border | (inactive & ad0);
+    return border;
 }
 
 
