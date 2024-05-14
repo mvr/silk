@@ -107,10 +107,13 @@ _DI_ uint32_t active_to_inactive(uint32_t x, int p) {
 
 /**
  * Determine the cells that are forced to be stable based on those
- * that are known to be unstable, making use of the 
+ * that are known to be unstable, making use of the width, height,
+ * and population bounds of the active region.
  */
 _DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, int max_width, int max_height, uint32_t max_pop) {
 
+    // the active region consists of cells adjacent to the catalyst
+    // that are not in the stable state:
     uint32_t active = not_stable & ad0;
     uint32_t active_y = hh::ballot_32(active != 0);
     uint32_t active_p = hh::warp_add((uint32_t) hh::popc32(active));
