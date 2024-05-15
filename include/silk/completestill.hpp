@@ -25,6 +25,102 @@ inline std::vector<T> expand_constraints(const T* known_live, const T* known_dea
 }
 
 template<typename T>
+inline void weak_stableprop(T* constraints) {
+
+    T diff = 0;
+
+    do {
+
+        // grid size:
+        int H = 8 * sizeof(T);
+
+        std::vector<T> known_live(H);
+        std::vector<T> known_dead(H);
+
+        // determine known cells:
+        for (int i = 0; i < H; i++) {
+            known_live[i] = constraints[i] & constraints[i + H] & constraints[i + 2 * H];
+            known_dead[i] = constraints[i + 3 * H] & constraints[i + 4 * H];
+            known_live[i] &= constraints[i + 5 * H] & constraints[i + 6 * H] & constraints[i + 7 * H];
+        }
+
+        std::vector<T> nc(8*H);
+
+        for (int i = 0; i < 8*H; i++) { nc[i] = constraints[i]; }
+
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < H; x++) {
+                int dead_count = 0;
+                int live_count = 0;
+                for (int oy = y - 1; oy <= y + 1; oy++) {
+                    for (int ox = x - 1; ox <= x + 1; ox++) {
+                        if ((oy == y) && (ox == x)) { continue; }
+                        live_count += (known_live[oy & (H - 1)] >> (ox & (H - 1))) & 1;
+                        dead_count += (known_dead[oy & (H - 1)] >> (ox & (H - 1))) & 1;
+                    }
+                }
+                nc[y]         |=  (live_count >= 1)                       ? (((T) 1) << x) : 0;
+                nc[y +     H] |= ((live_count >= 2) || (dead_count >= 8)) ? (((T) 1) << x) : 0;
+                nc[y + 2 * H] |= ((live_count >= 3) || (dead_count >= 7)) ? (((T) 1) << x) : 0;
+                nc[y + 3 * H] |= ((live_count >= 3) || (dead_count >= 7)) ? (((T) 1) << x) : 0;
+                nc[y + 4 * H] |= ((live_count >= 4) || (dead_count >= 6)) ? (((T) 1) << x) : 0;
+                nc[y + 5 * H] |= ((live_count >= 5) || (dead_count >= 5)) ? (((T) 1) << x) : 0;
+                nc[y + 6 * H] |= ((live_count >= 6) || (dead_count >= 4)) ? (((T) 1) << x) : 0;
+                nc[y + 7 * H] |=                       (dead_count >= 3)  ? (((T) 1) << x) : 0;
+
+                int max_live = 0;
+                if (((nc[y +     H] >> x) & 1) == 0) { max_live = 1; }
+                if (((nc[y + 2 * H] >> x) & 1) == 0) { max_live = 2; }
+                if (((nc[y + 3 * H] >> x) & 1) == 0) { max_live = 2; }
+                if (((nc[y + 4 * H] >> x) & 1) == 0) { max_live = 3; }
+                if (((nc[y + 5 * H] >> x) & 1) == 0) { max_live = 4; }
+                if (((nc[y + 6 * H] >> x) & 1) == 0) { max_live = 5; }
+                if (((nc[y + 7 * H] >> x) & 1) == 0) { max_live = 6; }
+
+                int max_dead = 0;
+                if (((nc[y + 7 * H] >> x) & 1) == 0) { max_dead = 2; }
+                if (((nc[y + 6 * H] >> x) & 1) == 0) { max_dead = 3; }
+                if (((nc[y + 5 * H] >> x) & 1) == 0) { max_dead = 4; }
+                if (((nc[y + 4 * H] >> x) & 1) == 0) { max_dead = 5; }
+                if (((nc[y + 3 * H] >> x) & 1) == 0) { max_dead = 6; }
+                if (((nc[y + 2 * H] >> x) & 1) == 0) { max_dead = 6; }
+                if (((nc[y +     H] >> x) & 1) == 0) { max_dead = 7; }
+                if (((nc[y]         >> x) & 1) == 0) { max_dead = 8; }
+
+                for (int oy = y - 1; oy <= y + 1; oy++) {
+                    for (int ox = x - 1; ox <= x + 1; ox++) {
+                        if ((oy == y) && (ox == x)) { continue; }
+                        if ((((known_live[oy & (H - 1)] >> (ox & (H - 1))) & 1) == 0) && (live_count == max_live)) {
+                            known_dead[oy & (H - 1)] |= (((T) 1) << (ox & (H - 1)));
+                        }
+                        if ((((known_dead[oy & (H - 1)] >> (ox & (H - 1))) & 1) == 0) && (dead_count == max_dead)) {
+                            known_live[oy & (H - 1)] |= (((T) 1) << (ox & (H - 1)));
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < H; i++) {
+            nc[i]         |= known_live[i];
+            nc[i +     H] |= known_live[i];
+            nc[i + 2 * H] |= known_live[i];
+            nc[i + 3 * H] |= known_dead[i];
+            nc[i + 4 * H] |= known_dead[i];
+            nc[i + 5 * H] |= known_live[i];
+            nc[i + 6 * H] |= known_live[i];
+            nc[i + 7 * H] |= known_live[i];
+        }
+
+        diff = 0;
+
+        for (int i = 0; i < 8*H; i++) { diff |= constraints[i] ^ nc[i]; constraints[i] = nc[i]; }
+
+    } while (diff != 0);
+}
+
+
+template<typename T>
 inline std::vector<T> complete_still_life(const T* constraints, int radius = 4, bool minimise = false) {
 
     // grid size:

@@ -61,8 +61,15 @@ void sl_to_bitplanes(const std::vector<uint32_t> &solution, uint32_t* bp) {
 void check_stableprop(uint32_t* ground_truth, uint32_t* problem, uint32_t* deduction) {
 
     int gpop = 0;
+    int opop = 0;
     int ppop = 0;
     int dpop = 0;
+
+    for (int i = 0; i < 256; i++) {
+        opop += hh::popc32(problem[i]);
+    }
+
+    kc::weak_stableprop(problem);
 
     for (int i = 0; i < 256; i++) {
         uint32_t g = ground_truth[i];
@@ -78,7 +85,7 @@ void check_stableprop(uint32_t* ground_truth, uint32_t* problem, uint32_t* deduc
         dpop += hh::popc32(d);
     }
 
-    std::cout << gpop << "        " << ppop << "        " << dpop << std::endl;
+    std::cout << gpop << " >= " << dpop << " >= " << ppop << " >= " << opop << std::endl;
 
     if (dpop == gpop - 1) {
         // something is terribly wrong:
