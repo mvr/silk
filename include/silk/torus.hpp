@@ -141,5 +141,35 @@ _DI_ uint32_t get_border() {
     return border;
 }
 
+_DI_ uint32_t compute_next_cell(uint32_t mask, uint32_t p) {
+
+    uint32_t u_ballot = hh::ballot_32(mask != 0);
+
+    if (u_ballot == 0) { return 0xffffffffu; }
+
+    // compute the cells that are greater than p in reading order:
+    uint32_t r = 0;
+    if (threadIdx.x > ((p >> 5) & 31)) {
+        r = 0xffffffffu;
+    } else if (threadIdx.x == ((p >> 5) & 31)) {
+        r = (0xfffffffeu) << (p & 31);
+    }
+
+    uint32_t c_mask = mask & r;
+    uint32_t c_ballot = hh::ballot_32(c_mask != 0);
+
+    if (c_ballot == 0) {
+        // there are no cells after p, so wrap around:
+        c_mask = mask;
+        c_ballot = u_ballot;
+    }
+
+    uint32_t upper_bits = hh::ctz32(c_ballot);
+    uint32_t lower_bits = hh::ctz32(hh::shuffle_32(c_mask, upper_bits));
+
+    uint32_t q = (upper_bits << 5) | lower_bits;
+    q = ((q - p - 1) & 1023) + p + 1; // increase by between 1 and 1024
+    return q;
+}
 
 } // namespace kc

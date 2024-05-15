@@ -30,6 +30,17 @@ __global__ void plane_shift_kernel(const uint4 *src, uint4 *dst) {
 }
 
 
+__global__ void plane_next_kernel(const uint32_t *src, uint32_t *dst) {
+
+    uint32_t p = blockIdx.x;
+    uint32_t mask = src[blockIdx.x * 32 + threadIdx.x];
+    uint32_t q = kc::compute_next_cell(mask, p);
+
+    dst[blockIdx.x] = q;
+
+}
+
+
 void check_shift(uint32_t* h_a, uint32_t* h_b, int x, int y) {
 
     uint64_t a[64];
@@ -48,6 +59,64 @@ void check_shift(uint32_t* h_a, uint32_t* h_b, int x, int y) {
         EXPECT_EQ(c, b[(i + y) & 63]);
     }
 }
+
+
+uint32_t plane_next_ref(const uint32_t* mask, uint32_t p) {
+
+    int pop = 0;
+    for (int i = 0; i < 32; i++) { pop += hh::popc32(mask[i]); }
+    if (pop == 0) { return 0xffffffffu; }
+
+    uint32_t q = p + 1;
+    while (((mask[(q >> 5) & 31] >> (q & 31)) & 1) == 0) { q += 1; }
+    return q;
+}
+
+
+void plane_next_test(int log2sparsity) {
+
+    int n = 10000;
+
+    uint32_t* d_a;
+    uint32_t* d_b;
+    uint32_t* h_a;
+    uint32_t* h_b;
+
+    cudaMalloc((void**) &d_a, n * 128);
+    cudaMalloc((void**) &d_b, n * 4);
+    cudaMallocHost((void**) &h_a, n * 128);
+    cudaMallocHost((void**) &h_b, n * 4);
+
+    hh::PRNG pcg(1, 2, 3);
+
+    for (int i = 0; i < n * 32; i++) {
+        uint32_t x = 0xffffffffu;
+        for (int j = 0; j < log2sparsity; j++) {
+            x &= pcg.generate();
+        }
+        h_a[i] = x;
+    }
+
+    cudaMemcpy(d_a, h_a, 128 * n, cudaMemcpyHostToDevice);
+    plane_next_kernel<<<n, 32>>>(d_a, d_b);
+    cudaMemcpy(h_b, d_b, 4 * n, cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < n; i++) {
+        uint32_t actual = h_b[i];
+        uint32_t expected = plane_next_ref(h_a + 32 * i, i);
+        EXPECT_EQ(actual, expected);
+    }
+
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFreeHost(h_a);
+    cudaFreeHost(h_b);
+}
+
+
+TEST(Next, s8) { plane_next_test(3); }
+TEST(Next, s64) { plane_next_test(6); }
+TEST(Next, s512) { plane_next_test(9); }
 
 
 TEST(Plane, GetMiddle) {

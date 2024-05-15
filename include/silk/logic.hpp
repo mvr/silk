@@ -17,6 +17,21 @@ _DI_ uint32_t apply_xor3(uint32_t x, uint32_t y, uint32_t z) {
 
 #include "generated/domino.hpp"
 
+/**
+ * Determine which cells are fully determined (7 of the 8 bitplanes
+ * are set); these are cells for which branching is meaningless.
+ */
+_DI_ uint32_t is_determined(uint32_t ad0, uint32_t ad1, uint32_t ad2, uint32_t al2, uint32_t al3, uint32_t ad4, uint32_t ad5, uint32_t ad6) {
+    uint32_t x2 = apply_maj3(ad0, ad1, ad2);
+    uint32_t x1 = apply_xor3(ad0, ad1, ad2);
+    uint32_t y2 = apply_maj3(ad4, ad5, ad6);
+    uint32_t y1 = apply_xor3(ad4, ad5, ad6);
+    uint32_t z2 = apply_maj3(al2, al3, x1);
+    uint32_t z1 = apply_xor3(al2, al3, x1);
+    return x2 & y2 & z2 & (y1 | z1);
+}
+
+
 _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
 
     {
