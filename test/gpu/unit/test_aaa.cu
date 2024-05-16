@@ -1,7 +1,12 @@
 #include <cpads/core.hpp>
 #include <gtest/gtest.h>
 
-TEST(AAA, AAA) {
+/**
+ * This test runs alphabetically before all other tests so that it
+ * can check that the CUDA runtime is working correctly before the
+ * other unit tests run.
+ */
+TEST(Aaa, Aaa) {
 
     size_t free_mem = 0;
     size_t total_mem = 0;
