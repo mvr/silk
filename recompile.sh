@@ -31,7 +31,7 @@ git submodule update --init --recursive
 
 cd build
 
-cmake ..
+cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j 8
 
 'test/gpu/gpu_unit_test'

@@ -69,14 +69,18 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
 }
 
 
-_DI_ bool branched_stableprop(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
+/**
+ * Apply soft branching on top of an arbitrary inference rule.
+ */
+template<typename Fn>
+_DI_ bool apply_branched(Fn lambda, uint32_t mask, uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
 
     uint32_t last_progress = 0;
     uint32_t p = 0;
 
     while (p - last_progress < 1024) {
 
-        uint32_t unknowns = ~is_determined(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
+        uint32_t unknowns = mask &~ is_determined(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 
         p = compute_next_cell(unknowns, p);
         if (p == 0xffffffffu) { return false; }
@@ -109,7 +113,7 @@ _DI_ bool branched_stableprop(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint
             uint32_t bd5 = smem[threadIdx.x + 192] | ((i == 6) ? 0u : this_cell);
             uint32_t bd6 = smem[threadIdx.x + 224] | ((i == 7) ? 0u : this_cell);
 
-            bool contradiction = stableprop(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
+            bool contradiction = lambda(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
             if (contradiction) { continue; }
 
             ad0 &= bd0;
@@ -140,6 +144,26 @@ _DI_ bool branched_stableprop(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint
     }
 
     return false;
+
+}
+
+/**
+ * stableprop with soft branching
+ */
+_DI_ bool branched_stableprop(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
+    return apply_branched([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
+        return stableprop(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
+    }, 0xffffffffu, smem, ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
+}
+
+/**
+ * stableprop with (soft branching)^2
+ * This is for illustrative purposes only; do not use as it is really slow
+ */
+_DI_ bool branched_stableprop2(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
+    return apply_branched([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
+        return branched_stableprop(smem + 256, bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
+    }, 0xffffffffu, smem, ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 }
 
 } // namespace kc
