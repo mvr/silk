@@ -1,4 +1,4 @@
-#include <silk/logic.hpp>
+#include <silk/stable.hpp>
 #include <silk/completestill.hpp>
 #include <cpads/random/prng.hpp>
 #include <gtest/gtest.h>
