@@ -40,7 +40,7 @@ def main():
     src = '''_DI_ bool inplace_advance_unknown(
         %s,
         uint32_t &not_low, uint32_t &not_high, uint32_t &not_stable,
-        uint32_t stator, int max_width, int max_height, uint32_t max_pop
+        uint32_t stator, int max_width = 28, int max_height = 28, uint32_t max_pop = 784
     ) {
 
     // obtain lower and upper bounds in binary:

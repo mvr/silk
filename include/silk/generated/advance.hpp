@@ -1,7 +1,7 @@
 _DI_ bool inplace_advance_unknown(
         uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
         uint32_t &not_low, uint32_t &not_high, uint32_t &not_stable,
-        uint32_t stator, int max_width, int max_height, uint32_t max_pop
+        uint32_t stator, int max_width = 28, int max_height = 28, uint32_t max_pop = 784
     ) {
 
     // obtain lower and upper bounds in binary:
