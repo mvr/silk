@@ -3,6 +3,7 @@
 #include <cpads/random/prng.hpp>
 #include <gtest/gtest.h>
 
+template<bool branching>
 __global__ void stableprop_kernel(uint32_t *x) {
 
     uint32_t offset = blockIdx.x * 256 + threadIdx.x;
@@ -16,7 +17,12 @@ __global__ void stableprop_kernel(uint32_t *x) {
     uint32_t d5 = x[offset + 192];
     uint32_t d6 = x[offset + 224];
 
-    kc::stableprop(d0, d1, d2, l2, l3, d4, d5, d6);
+    if constexpr (branching) {
+        __shared__ uint32_t smem[256];
+        kc::branched_stableprop(smem, d0, d1, d2, l2, l3, d4, d5, d6);
+    } else {
+        kc::stableprop(d0, d1, d2, l2, l3, d4, d5, d6);
+    }
 
     x[offset] = d0;
     x[offset + 32] = d1;
@@ -58,12 +64,13 @@ void sl_to_bitplanes(const std::vector<uint32_t> &solution, uint32_t* bp) {
 }
 
 
-void check_stableprop(uint32_t* ground_truth, uint32_t* problem, uint32_t* deduction) {
+void check_stableprop(uint32_t* ground_truth, uint32_t* problem, uint32_t* deduction, uint32_t* deduction2) {
 
     int gpop = 0;
     int opop = 0;
     int ppop = 0;
     int dpop = 0;
+    int epop = 0;
 
     for (int i = 0; i < 256; i++) {
         opop += hh::popc32(problem[i]);
@@ -75,17 +82,20 @@ void check_stableprop(uint32_t* ground_truth, uint32_t* problem, uint32_t* deduc
         uint32_t g = ground_truth[i];
         uint32_t p = problem[i];
         uint32_t d = deduction[i];
+        uint32_t e = deduction2[i];
 
-        // check ground_truth >= deduction >= problem:
-        EXPECT_EQ((g | d), g);
+        // check ground_truth >= deduction2 >= deduction >= problem:
+        EXPECT_EQ((g | e), g);
+        EXPECT_EQ((e | d), e);
         EXPECT_EQ((p & d), p);
 
         gpop += hh::popc32(g);
         ppop += hh::popc32(p);
         dpop += hh::popc32(d);
+        epop += hh::popc32(e);
     }
 
-    std::cout << gpop << " >= " << dpop << " >= " << ppop << " >= " << opop << std::endl;
+    std::cout << gpop << " >= " << epop << " >= " << dpop << " >= " << ppop << " >= " << opop << std::endl;
 
     if (dpop == gpop - 1) {
         // something is terribly wrong:
@@ -194,11 +204,13 @@ TEST(CompleteStill, Random) {
     uint32_t* ground_truth;
     uint32_t* problem;
     uint32_t* deduction;
+    uint32_t* deduction2;
     uint32_t* device_buffer;
 
     cudaMallocHost((void**) &ground_truth, N << 10);
     cudaMallocHost((void**) &problem, N << 10);
     cudaMallocHost((void**) &deduction, N << 10);
+    cudaMallocHost((void**) &deduction2, N << 10);
     cudaMalloc((void**) &device_buffer, N << 10);
 
     std::cout << "Generating problems: [";
@@ -219,18 +231,19 @@ TEST(CompleteStill, Random) {
 
     std::cout << "Running kernel..." << std::endl;
     cudaMemcpy(device_buffer, problem, N << 10, cudaMemcpyHostToDevice);
-    for (int i = 0; i < 1; i++) {
-        stableprop_kernel<<<N, 32>>>(device_buffer);
-    }
+    stableprop_kernel<false><<<N, 32>>>(device_buffer);
     cudaMemcpy(deduction, device_buffer, N << 10, cudaMemcpyDeviceToHost);
+    stableprop_kernel<true><<<N, 32>>>(device_buffer);
+    cudaMemcpy(deduction2, device_buffer, N << 10, cudaMemcpyDeviceToHost);
     cudaFree(device_buffer);
     std::cout << "...done!" << std::endl;
 
     for (int i = 0; i < N; i++) {
-        check_stableprop(ground_truth + (i << 8), problem + (i << 8), deduction + (i << 8));
+        check_stableprop(ground_truth + (i << 8), problem + (i << 8), deduction + (i << 8), deduction2 + (i << 8));
     }
 
     cudaFreeHost(ground_truth);
     cudaFreeHost(problem);
     cudaFreeHost(deduction);
+    cudaFreeHost(deduction2);
 }

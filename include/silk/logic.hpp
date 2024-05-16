@@ -69,6 +69,80 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
 }
 
 
+_DI_ bool branched_stableprop(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
+
+    uint32_t last_progress = 0;
+    uint32_t p = 0;
+
+    while (p - last_progress < 1024) {
+
+        uint32_t unknowns = ~is_determined(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
+
+        p = compute_next_cell(unknowns, p);
+        if (p == 0xffffffffu) { return false; }
+
+        // push the parent state onto a shared memory 'stack':
+        smem[threadIdx.x]       = ad0; ad0 = 0xffffffffu;
+        smem[threadIdx.x + 32]  = ad1; ad1 = 0xffffffffu;
+        smem[threadIdx.x + 64]  = ad2; ad2 = 0xffffffffu;
+        smem[threadIdx.x + 96]  = al2; al2 = 0xffffffffu;
+        smem[threadIdx.x + 128] = al3; al3 = 0xffffffffu;
+        smem[threadIdx.x + 160] = ad4; ad4 = 0xffffffffu;
+        smem[threadIdx.x + 192] = ad5; ad5 = 0xffffffffu;
+        smem[threadIdx.x + 224] = ad6; ad6 = 0xffffffffu;
+
+        uint32_t this_cell = (1u << (p & 31));
+        this_cell = (threadIdx.x == ((p >> 5) & 31)) ? this_cell : 0u;
+
+        for (int i = 0; i < 8; i++) {
+            uint32_t r = smem[threadIdx.x + i * 32];
+            if (hh::ballot_32(r & this_cell)) {
+                // we have ruled out state i already
+                continue;
+            }
+            uint32_t bd0 = smem[threadIdx.x      ] | ((i == 0) ? 0u : this_cell);
+            uint32_t bd1 = smem[threadIdx.x + 32 ] | ((i == 1) ? 0u : this_cell);
+            uint32_t bd2 = smem[threadIdx.x + 64 ] | ((i == 2) ? 0u : this_cell);
+            uint32_t bl2 = smem[threadIdx.x + 96 ] | ((i == 3) ? 0u : this_cell);
+            uint32_t bl3 = smem[threadIdx.x + 128] | ((i == 4) ? 0u : this_cell);
+            uint32_t bd4 = smem[threadIdx.x + 160] | ((i == 5) ? 0u : this_cell);
+            uint32_t bd5 = smem[threadIdx.x + 192] | ((i == 6) ? 0u : this_cell);
+            uint32_t bd6 = smem[threadIdx.x + 224] | ((i == 7) ? 0u : this_cell);
+
+            bool contradiction = stableprop(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
+            if (contradiction) { continue; }
+
+            ad0 &= bd0;
+            ad1 &= bd1;
+            ad2 &= bd2;
+            al2 &= bl2;
+            al3 &= bl3;
+            ad4 &= bd4;
+            ad5 &= bd5;
+            ad6 &= bd6;
+        }
+
+        uint32_t contradiction = ad0 & ad1 & ad2 & al2 & al3 & ad4 & ad5 & ad6;
+        contradiction = hh::ballot_32(contradiction != 0);
+        if (contradiction) { return true; }
+
+        uint32_t progress = 0;
+        progress |= (ad0 &~ smem[threadIdx.x]);
+        progress |= (ad1 &~ smem[threadIdx.x + 32]);
+        progress |= (ad2 &~ smem[threadIdx.x + 64]);
+        progress |= (al2 &~ smem[threadIdx.x + 96]);
+        progress |= (al3 &~ smem[threadIdx.x + 128]);
+        progress |= (ad4 &~ smem[threadIdx.x + 160]);
+        progress |= (ad5 &~ smem[threadIdx.x + 192]);
+        progress |= (ad6 &~ smem[threadIdx.x + 224]);
+
+        if (hh::ballot_32(progress)) { last_progress = p; }
+    }
+
+    return false;
+}
+
+
 /**
  * Returns the sum of the 16 booleans obtained by taking the
  * values of a and b on each of the 8 neighbours. For our application
