@@ -56,11 +56,7 @@ std::vector<uint32_t> advance1gen(std::vector<uint32_t> a) {
     return b;
 }
 
-void check_advance(uint32_t *input, uint32_t *output, int gens) {
-
-    for (int i = 0; i < 256; i++) {
-        EXPECT_EQ(input[i], output[i]);
-    }
+void check_fully_known(uint32_t *output) {
 
     int pop = 0;
     for (int i = 256; i < 352; i++) {
@@ -72,6 +68,23 @@ void check_advance(uint32_t *input, uint32_t *output, int gens) {
     for (int i = 256; i < 288; i++) {
         EXPECT_EQ(output[i] ^ output[i + 32] ^ output[i + 64], ((uint32_t) 0));
     }
+}
+
+void check_unknown_stable(uint32_t *output) {
+
+    check_fully_known(output);
+    for (int i = 0; i < 32; i++) {
+        EXPECT_EQ(output[i + 320], 0u);
+    }
+}
+
+void check_advance(uint32_t *input, uint32_t *output, int gens) {
+
+    for (int i = 0; i < 256; i++) {
+        EXPECT_EQ(input[i], output[i]);
+    }
+
+    check_fully_known(output);
 
     std::vector<uint32_t> gen0(32);
     std::vector<uint32_t> genX(32);
@@ -88,6 +101,20 @@ void check_advance(uint32_t *input, uint32_t *output, int gens) {
 
     for (int i = 0; i < 32; i++) {
         EXPECT_EQ(gen0[i], genX[i]);
+    }
+}
+
+void generate_unknown_stable(uint64_t seed, uint32_t* output, double prob) {
+
+    std::vector<uint32_t> gt(256);
+
+    make_random_sl(seed, &(gt[0]), output, prob);
+
+    for (int y = 0; y < 32; y++) {
+        output[y + 256] = 0xffffffffu;
+        output[y + 288] = 0xffffffffu;
+        output[y + 320] = 0x00000000u;
+        output[y + 352] = ((y >= 2) && (y < 30)) ? 0xc0000003u : 0xffffffffu;
     }
 }
 
@@ -111,7 +138,7 @@ void random_sl_with_perturbation(uint64_t seed, uint32_t* output) {
     }
 }
 
-TEST(Advance, Random) {
+void advance_test(bool fully_stable) {
 
     int N = 100;
     int gens = 6;
@@ -126,7 +153,11 @@ TEST(Advance, Random) {
 
     std::cout << "Generating problems: [";
     for (int i = 0; i < N; i++) {
-        random_sl_with_perturbation(i, input + i * 384);
+        if (fully_stable) {
+            generate_unknown_stable(i, input + i * 384, (1.0 * i) / N);
+        } else {
+            random_sl_with_perturbation(i, input + i * 384);
+        }
         std::cout << "*" << std::flush;
     }
     std::cout << "]" << std::endl;
@@ -138,9 +169,16 @@ TEST(Advance, Random) {
     cudaFree(device_buffer);
 
     for (int i = 0; i < N; i++) {
-        check_advance(input + i * 384, output + i * 384, gens);
+        if (fully_stable) {
+            check_unknown_stable(output + i * 384);
+        } else {
+            check_advance(input + i * 384, output + i * 384, gens);
+        }
     }
 
     cudaFreeHost(input);
     cudaFreeHost(output);
 }
+
+TEST(Advance, Random) { advance_test(false); }
+TEST(Advance, Stable) { advance_test(true); }
