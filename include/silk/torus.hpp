@@ -50,12 +50,21 @@ _DI_ void shift_torus_inplace(uint32_t &x, uint32_t &y, uint32_t &z, uint32_t &w
     w = zw >> 32;
 }
 
-_DI_ uint4 shift_torus(uint4 a, int i, int j) {
-
-    uint4 b = a;
+_DI_ void shift_torus_inplace(uint4 &b, int i, int j) {
     shift_torus_inplace(b.x, b.y, b.z, b.w, i, j);
-    return b;
+}
 
+_DI_ void shift_plane_inplace(uint32_t &x, int i, int j) {
+    uint32_t y = 0;
+    uint32_t z = 0;
+    uint32_t w = 0;
+    shift_torus_inplace(x, y, z, w, i, j);
+}
+
+_DI_ uint4 shift_torus(uint4 a, int i, int j) {
+    uint4 b = a;
+    shift_torus_inplace(b, i, j);
+    return b;
 }
 
 template<bool direction, int amount>
@@ -105,6 +114,12 @@ _DI_ uint32_t active_to_inactive(uint32_t x, int p) {
     return (y << p);
 }
 
+_DI_ uint32_t get_border() {
+    // everything outside central 28x28 square must be stable:
+    uint32_t border = (((threadIdx.x + 2) & 31) < 4) ? 0xffffffffu : 0xc0000003u;
+    return border;
+}
+
 /**
  * Determine the cells that are forced to be stable based on those
  * that are known to be unstable, making use of the width, height,
@@ -132,13 +147,8 @@ _DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, uint32_t stat
     if (active_p >  max_pop) { inactive_p = 0xffffffffu; }
     uint32_t inactive = inactive_x | inactive_y | inactive_p;
 
-    return stator | (inactive & ad0);
-}
-
-_DI_ uint32_t get_border() {
-    // everything outside central 28x28 square must be stable:
-    uint32_t border = (((threadIdx.x + 2) & 31) < 4) ? 0xffffffffu : 0xc0000003u;
-    return border;
+    uint32_t border = get_border();
+    return stator | border | (inactive & ad0);
 }
 
 _DI_ uint32_t compute_next_cell(uint32_t mask, uint32_t p) {

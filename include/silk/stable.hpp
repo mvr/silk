@@ -9,6 +9,12 @@ _DI_ uint32_t apply_maj3(uint32_t x, uint32_t y, uint32_t z) {
     return res;
 }
 
+_DI_ uint32_t apply_min3(uint32_t x, uint32_t y, uint32_t z) {
+    uint32_t res;
+    asm("lop3.b32 %0, %1, %2, %3, 0b00010111;" : "=r"(res) : "r"(x), "r"(y), "r"(z));
+    return res;
+}
+
 _DI_ uint32_t apply_xor3(uint32_t x, uint32_t y, uint32_t z) {
     uint32_t res; // = x ^ y ^ z;
     asm("lop3.b32 %0, %1, %2, %3, 0b10010110;" : "=r"(res) : "r"(x), "r"(y), "r"(z));
