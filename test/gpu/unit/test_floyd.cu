@@ -34,10 +34,11 @@ TEST(Floyd, Cycle) {
         {0x02, 0xc0, 0x47}, // diehard
         {0x7f}, // honeyfarm precursor
         {0x1f}, // traffic light precursor
-        {0x1f, 0x11} // pulsar precursor
+        {0x1f, 0x11}, // pulsar precursor
+        {1, 7, 2}, // r-pentomino
     };
 
-    std::vector<int32_t> solutions = {640, 15, 0, 1, 2, 3};
+    std::vector<int32_t> solutions = {640, 15, 0, 1, 2, 3, -1};
 
     int N = problems.size();
 

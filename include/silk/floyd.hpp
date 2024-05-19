@@ -3,6 +3,15 @@
 
 namespace kc {
 
+/**
+ * Return codes:
+ * -3: reached ambiguity but made progress (so do unit propagation)
+ * -2: made no progress (so we need to split into two subproblems)
+ * -1: contradiction obtained
+ *  0: clean fizzle
+ *  1: restablised into different still-life
+ *  n: oscillator with period n (n >= 2)
+ */
 _DI_ int floyd_cycle(
         uint4 &ad0, uint4 &ad1, uint4 &ad2, uint4 &al2, uint4 &al3, uint4 &ad4, uint4 &ad5, uint4 &ad6, uint4 &stator,
         uint32_t &perturbation, uint32_t &px, uint32_t &py, int max_width, int max_height, int max_pop
@@ -33,7 +42,7 @@ _DI_ int floyd_cycle(
             }
 
             if (hh::ballot_32(apply_min3(not_low, not_high, not_stable))) {
-                generation = -2; break; // ambiguous
+                generation = (generation == 0) ? -2 : -3; break; // ambiguous
             }
 
             if (hh::ballot_32(not_stable) == 0) {
