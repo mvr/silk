@@ -6,16 +6,18 @@ namespace kc {
 
 _DI_ bool run_rollout(
     uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
-    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens
+    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens, uint32_t* metrics = nullptr
 ) {
 
     bool improved = true;
+
+    bump_counter(metrics, METRIC_ROLLOUT);
 
     while (improved) {
 
         {
             // apply stable propagation rules:
-            bool contradiction = kc::stableprop(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
+            bool contradiction = kc::stableprop(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, metrics);
             if (contradiction) { return true; }
         }
 
@@ -30,6 +32,7 @@ _DI_ bool run_rollout(
 
         // run rollout:
         for (int i = 0; i < gens; i++) {
+            bump_counter(metrics, METRIC_ADVANCE);
             improved = kc::inplace_advance_unknown(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop);
             bool contradiction = hh::ballot_32(not_low & not_high & not_stable);
             if (contradiction) { return true; }
@@ -44,15 +47,17 @@ _DI_ bool run_rollout(
 
 _DI_ bool branched_rollout(
     uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
-    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens
+    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens, uint32_t *metrics = nullptr
 ) {
+
+    bump_counter(metrics, METRIC_BRANCHING);
 
     uint32_t mask = perturbation;
     mask = mask | kc::shift_plane<false, 1>(mask) | kc::shift_plane<false, -1>(mask);
     mask = mask | kc::shift_plane< true, 1>(mask) | kc::shift_plane< true, -1>(mask);
 
     return apply_branched([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
-        return run_rollout(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6, perturbation, stator, max_width, max_height, max_pop, gens);
+        return run_rollout(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6, perturbation, stator, max_width, max_height, max_pop, gens, metrics);
     }, mask, smem, ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 }
 

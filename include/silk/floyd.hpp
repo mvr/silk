@@ -14,7 +14,7 @@ namespace kc {
  */
 _DI_ int floyd_cycle(
         uint4 &ad0, uint4 &ad1, uint4 &ad2, uint4 &al2, uint4 &al3, uint4 &ad4, uint4 &ad5, uint4 &ad6, uint4 &stator,
-        uint32_t &perturbation, uint32_t &px, uint32_t &py, int max_width, int max_height, int max_pop
+        uint32_t &perturbation, uint32_t &px, uint32_t &py, int max_width, int max_height, int max_pop, uint32_t* metrics = nullptr
     ) {
 
     // a half-speed version of perturbation for Floyd's algorithm:
@@ -52,6 +52,7 @@ _DI_ int floyd_cycle(
             // advance by one generation:
             perturbation = not_stable;
             generation += 1;
+            bump_counter(metrics, METRIC_FLOYD_ITER);
         }
 
         {
