@@ -57,9 +57,6 @@ _DI_ float hard_branch(
 
     uint32_t unknown_if_stable = ambiguous &~ not_stable;
 
-    bool type_a = hh::ballot_32(unknown_if_stable);
-    if (type_a) { ambiguous = unknown_if_stable; }
-
     uint32_t p = compute_next_cell(ambiguous, 0);
     uint32_t best_p = p;
     float best_loss = 1.0e30f;
@@ -148,25 +145,16 @@ _DI_ float hard_branch(
     uint32_t this_cell = (1u << (best_p & 31));
     this_cell = (threadIdx.x == ((best_p >> 5) & 31)) ? this_cell : 0u;
 
-    uint32_t bd0 = 0;
-    uint32_t bd1 = 0;
-    uint32_t bd2 = 0;
-    uint32_t bl2 = 0xffffffffu;
-    uint32_t bl3 = 0xffffffffu;
-    uint32_t bd4 = 0;
-    uint32_t bd5 = 0;
-    uint32_t bd6 = 0;
-
-    if (type_a) {
-        bd0 = smem[threadIdx.x];
-        bd1 = smem[threadIdx.x + 32];
-        bd2 = smem[threadIdx.x + 64];
-        bl2 = smem[threadIdx.x + 96];
-        bl3 = smem[threadIdx.x + 128];
-        bd4 = smem[threadIdx.x + 160];
-        bd5 = smem[threadIdx.x + 192];
-        bd6 = smem[threadIdx.x + 224];
-    }
+    // if a cell is unknown as to whether it's stable, then we
+    // copy from smem; otherwise, we set to 0 for bd and 1 for bl:
+    uint32_t bd0 = unknown_if_stable & smem[threadIdx.x];
+    uint32_t bd1 = unknown_if_stable & smem[threadIdx.x + 32];
+    uint32_t bd2 = unknown_if_stable & smem[threadIdx.x + 64];
+    uint32_t bl2 = (~unknown_if_stable) | smem[threadIdx.x + 96];
+    uint32_t bl3 = (~unknown_if_stable) | smem[threadIdx.x + 128];
+    uint32_t bd4 = unknown_if_stable & smem[threadIdx.x + 160];
+    uint32_t bd5 = unknown_if_stable & smem[threadIdx.x + 192];
+    uint32_t bd6 = unknown_if_stable & smem[threadIdx.x + 224];
 
     kc::save4(
         writing_location + 192,
