@@ -27,6 +27,13 @@ _HD_ void lane2coords(uint32_t lane, int32_t &x, int32_t &y) {
 
 }
 
+/**
+ * Evaluates the Silk NNUE on a signature of 29 uint9s.
+ *
+ * The Silk NNUE has 1906816 parameters of which 9984 are active.
+ * The parameters are stored contiguously in a GPU-resident array
+ * of 7627264 bytes. This function accepts a pointer to that array.
+ */
 _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
 
     // first linear layer: 14848 --> 128
@@ -59,9 +66,9 @@ _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
 
     // CReLU: 32 --> 64
     acc.x = hh::max(layer2, 0.0f);
-    acc.y = hh::max(-layer2, 0.0f);
-    acc.z = hh::shuffle_xor_32(acc.x, 16);
-    acc.w = hh::shuffle_xor_32(acc.y, 16);
+    acc.y = hh::shuffle_xor_32(acc.x, 16);
+    acc.z = hh::max(-layer2, 0.0f);
+    acc.w = hh::shuffle_xor_32(acc.z, 16);
 
     // third linear layer: 64 --> 32
     float layer3 = biases.y;
