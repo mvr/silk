@@ -27,4 +27,60 @@ _HD_ void lane2coords(uint32_t lane, int32_t &x, int32_t &y) {
 
 }
 
+_DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
+
+    // first linear layer: 14848 --> 128
+    float4 acc; acc.x = 0.0f; acc.y = 0.0f; acc.z = 0.0f; acc.w = 0.0f;
+    for (int i = 0; i < 29; i++) {
+        uint32_t sig_i = hh::shuffle_32(signature, i);
+        float4 row = nnue[16384 * i + 32 * sig_i + threadIdx.x];
+        acc.x += row.x;
+        acc.y += row.y;
+        acc.z += row.z;
+        acc.w += row.w;
+    }
+
+    // ReLU: 128 --> 128
+    acc.x = hh::max(acc.x, 0.0f);
+    acc.y = hh::max(acc.y, 0.0f);
+    acc.z = hh::max(acc.z, 0.0f);
+    acc.w = hh::max(acc.w, 0.0f);
+
+    // load biases:
+    float4 biases = nnue[476672 + threadIdx.x];
+
+    // second linear layer: 128 --> 32
+    float layer2 = biases.x;
+    for (int i = 0; i < 32; i++) {
+        float4 row = nnue[475136 + 32 * i + threadIdx.x];
+        float ip = acc.x * row.x + acc.y * row.y + acc.z * row.z + acc.w * row.w;
+        layer2 += hh::shuffle_xor_32(ip, i);
+    }
+
+    // CReLU: 32 --> 64
+    acc.x = hh::max(layer2, 0.0f);
+    acc.y = hh::max(-layer2, 0.0f);
+    acc.z = hh::shuffle_xor_32(acc.x, 16);
+    acc.w = hh::shuffle_xor_32(acc.y, 16);
+
+    // third linear layer: 64 --> 32
+    float layer3 = biases.y;
+    for (int i = 0; i < 16; i++) {
+        float4 row = nnue[476160 + 32 * i + threadIdx.x];
+        float ip = acc.x * row.x + acc.y * row.y + acc.z * row.z + acc.w * row.w;
+        layer3 += hh::shuffle_xor_32(ip, i);
+    }
+
+    // CReLU: 32 --> 64
+    // fourth linear layer: 64 --> 1
+    float output = hh::max(layer3, 0.0f) * biases.z + hh::max(-layer3, 0.0f) * biases.w;
+    output += hh::shuffle_xor_32(output, 1);
+    output += hh::shuffle_xor_32(output, 2);
+    output += hh::shuffle_xor_32(output, 4);
+    output += hh::shuffle_xor_32(output, 8);
+    output += hh::shuffle_xor_32(output, 16);
+
+    return output;
 }
+
+} // namespace kc

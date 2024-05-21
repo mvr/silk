@@ -1,7 +1,7 @@
 _DI_ bool inplace_advance_unknown(
         uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
         uint32_t &not_low, uint32_t &not_high, uint32_t &not_stable,
-        uint32_t stator, int max_width = 28, int max_height = 28, uint32_t max_pop = 784
+        uint32_t stator, int max_width = 28, int max_height = 28, uint32_t max_pop = 784, uint32_t* smem = nullptr
     ) {
 
     // obtain lower and upper bounds in binary:
@@ -111,6 +111,18 @@ _DI_ bool inplace_advance_unknown(
     uint32_t gad4 = ad4 | (forced_stable & unstable_d4); improvements |= (gad4 &~ ad4); ad4 = gad4;
     uint32_t gad5 = ad5 | (forced_stable & unstable_d5); improvements |= (gad5 &~ ad5); ad5 = gad5;
     uint32_t gad6 = ad6 | (forced_stable & unstable_d6); improvements |= (gad6 &~ ad6); ad6 = gad6;
+
+    // store in smem if appropriate:
+    if (smem != nullptr) {
+        smem[threadIdx.x] = unstable_d0;
+        smem[threadIdx.x + 32] = unstable_d1;
+        smem[threadIdx.x + 64] = unstable_d2;
+        smem[threadIdx.x + 96] = unstable_l2;
+        smem[threadIdx.x + 128] = unstable_l3;
+        smem[threadIdx.x + 160] = unstable_d4;
+        smem[threadIdx.x + 192] = unstable_d5;
+        smem[threadIdx.x + 224] = unstable_d6;
+    }
 
     // advance by one generation in-place:
     not_low = gnot_low;
