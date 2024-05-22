@@ -42,8 +42,10 @@ template<typename Fn>
 _DI_ float hard_branch(
         uint4* writing_location, uint32_t perturbation, uint32_t &metadata_z,
         uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
-        uint32_t stator, int max_width, int max_height, int max_pop, uint32_t *smem, float epsilon, Fn lambda
+        uint32_t stator, int max_width, int max_height, int max_pop, uint32_t *smem, float epsilon, Fn lambda, uint32_t *metrics
     ) {
+
+    bump_counter(metrics, METRIC_HARDBRANCH);
 
     uint32_t not_stable = perturbation;
     uint32_t forced_dead = al2 & al3;
@@ -103,6 +105,8 @@ _DI_ float hard_branch(
         uint32_t population = hh::warp_add((uint32_t) hh::popc32(ambiguous));
         random_b *= population;
         random_b = random_b >> 22;
+
+        bump_counter(metrics, choose_random_lever ? METRIC_EXPLORE : METRIC_EXPLOIT);
     }
 
     uint32_t cell_idx = 0;
@@ -110,6 +114,8 @@ _DI_ float hard_branch(
 
         // only do the evaluation if we need to:
         if ((cell_idx == random_b) || (!choose_random_lever)) {
+
+            bump_counter(metrics, METRIC_NNUE);
 
             uint32_t ex = (dx + p) & 31;
             uint32_t ey = (dy + (p >> 5)) & 31;
