@@ -182,4 +182,21 @@ _DI_ uint32_t compute_next_cell(uint32_t mask, uint32_t p) {
     return q;
 }
 
+template<bool Horizontal, bool Vertical>
+_DI_ uint32_t expand_plane(uint32_t x) {
+
+    uint32_t y = x;
+    if constexpr (Vertical) {
+        y = y | kc::shift_plane< true, 1>(x) | kc::shift_plane< true, -1>(x);
+    }
+    if constexpr (Horizontal) {
+        y = y | kc::shift_plane<false, 1>(x) | kc::shift_plane<false, -1>(x);
+    }
+    return y;
+}
+
+_DI_ int32_t popc128(uint4 a) {
+    return hh::popc32(a.x) + hh::popc32(a.y) + hh::popc32(a.z) + hh::popc32(a.w);
+}
+
 } // namespace kc

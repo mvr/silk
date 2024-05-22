@@ -38,6 +38,8 @@ _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
 
     // first linear layer: 14848 --> 128
     float4 acc; acc.x = 0.0f; acc.y = 0.0f; acc.z = 0.0f; acc.w = 0.0f;
+
+    #pragma unroll 4
     for (int i = 0; i < 29; i++) {
         uint32_t sig_i = hh::shuffle_32(signature, i);
         float4 row = nnue[16384 * i + 32 * sig_i + threadIdx.x];
@@ -58,6 +60,7 @@ _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
 
     // second linear layer: 128 --> 32
     float layer2 = biases.x;
+    #pragma unroll 4
     for (int i = 0; i < 32; i++) {
         float4 row = nnue[475136 + 32 * i + threadIdx.x];
         float ip = acc.x * row.x + acc.y * row.y + acc.z * row.z + acc.w * row.w;
@@ -72,6 +75,7 @@ _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
 
     // third linear layer: 64 --> 32
     float layer3 = biases.y;
+    #pragma unroll 4
     for (int i = 0; i < 16; i++) {
         float4 row = nnue[476160 + 32 * i + threadIdx.x];
         float ip = acc.x * row.x + acc.y * row.y + acc.z * row.z + acc.w * row.w;

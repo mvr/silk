@@ -109,6 +109,7 @@ _DI_ bool apply_branched(Fn lambda, uint32_t mask, uint32_t *smem, uint32_t &ad0
         uint32_t this_cell = (1u << (p & 31));
         this_cell = (threadIdx.x == ((p >> 5) & 31)) ? this_cell : 0u;
 
+        #pragma unroll 1
         for (int i = 0; i < 8; i++) {
             uint32_t r = smem[threadIdx.x + i * 32];
             if (hh::ballot_32(r & this_cell)) {

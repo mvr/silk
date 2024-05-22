@@ -120,25 +120,30 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
                 smd[solution_idx] = return_code;
             }
             solution_idx = hh::shuffle_32(solution_idx, 0);
-
-            kc::shift_torus_inplace(ad0, px, py);
-            kc::shift_torus_inplace(ad1, px, py);
-            kc::shift_torus_inplace(ad2, px, py);
-            kc::shift_torus_inplace(al2, px, py);
-            kc::shift_torus_inplace(al3, px, py);
-            kc::shift_torus_inplace(ad4, px, py);
-            kc::shift_torus_inplace(ad5, px, py);
-            kc::shift_torus_inplace(ad6, px, py);
-
             uint4* solution_location = srb + 256 * ((uint64_t) solution_idx);
 
+            kc::shift_torus_inplace(ad0, px, py);
             solution_location[threadIdx.x] = ad0;
+
+            kc::shift_torus_inplace(ad1, px, py);
             solution_location[threadIdx.x + 32] = ad1;
+
+            kc::shift_torus_inplace(ad2, px, py);
             solution_location[threadIdx.x + 64] = ad2;
+
+            kc::shift_torus_inplace(al2, px, py);
             solution_location[threadIdx.x + 96] = al2;
+
+            kc::shift_torus_inplace(al3, px, py);
             solution_location[threadIdx.x + 128] = al3;
+
+            kc::shift_torus_inplace(ad4, px, py);
             solution_location[threadIdx.x + 160] = ad4;
+
+            kc::shift_torus_inplace(ad5, px, py);
             solution_location[threadIdx.x + 192] = ad5;
+
+            kc::shift_torus_inplace(ad6, px, py);
             solution_location[threadIdx.x + 224] = ad6;
         }
         return;
@@ -153,12 +158,22 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     output_idx = hh::shuffle_32(output_idx, 0);
     uint4* writing_location = prb + uint4s_per_pp * output_idx;
 
-    kc::save4(writing_location,       ad0.y, ad1.y, ad2.y, al2.y);
-    kc::save4(writing_location + 32,  al3.y, ad4.y, ad5.y, ad6.y);
-    kc::save4(writing_location + 64,  ad0.z, ad1.z, ad2.z, al2.z);
-    kc::save4(writing_location + 96,  al3.z, ad4.z, ad5.z, ad6.z);
-    kc::save4(writing_location + 128, ad0.w, ad1.w, ad2.w, al2.w);
-    kc::save4(writing_location + 160, al3.w, ad4.w, ad5.w, ad6.w);
+    uint32_t total_info = 0; // between 0 and 32768
+    total_info += kc::save4(writing_location,       ad0.y, ad1.y, ad2.y, al2.y);
+    total_info += kc::save4(writing_location + 32,  al3.y, ad4.y, ad5.y, ad6.y);
+    total_info += kc::save4(writing_location + 64,  ad0.z, ad1.z, ad2.z, al2.z);
+    total_info += kc::save4(writing_location + 96,  al3.z, ad4.z, ad5.z, ad6.z);
+    total_info += kc::save4(writing_location + 128, ad0.w, ad1.w, ad2.w, al2.w);
+    total_info += kc::save4(writing_location + 160, al3.w, ad4.w, ad5.w, ad6.w);
+    total_info += hh::popc32(ad0.x);
+    total_info += hh::popc32(ad1.x);
+    total_info += hh::popc32(ad2.x);
+    total_info += hh::popc32(al2.x);
+    total_info += hh::popc32(al3.x);
+    total_info += hh::popc32(ad4.x);
+    total_info += hh::popc32(ad5.x);
+    total_info += hh::popc32(ad6.x);
+    total_info = hh::warp_add(total_info);
 
     __syncthreads();
 
@@ -185,6 +200,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     if (threadIdx.x == 2) { metadata_out = px; }
     if (threadIdx.x == 3) { metadata_out = py; }
     if (threadIdx.x == 4) { metadata_out = final_loss_bits; }
+    if (threadIdx.x == 5) { metadata_out = total_info; }
 
     if (threadIdx.x < 8) {
         // copy the 32-byte metadata sector into the parent problem:
