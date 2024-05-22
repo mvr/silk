@@ -38,10 +38,10 @@ _DI_ uint32_t is_determined(uint32_t ad0, uint32_t ad1, uint32_t ad2, uint32_t a
     return x2 & y2 & z2 & (y1 | z1);
 }
 
-
+template<bool CollectMetrics>
 _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6, uint32_t* metrics = nullptr) {
 
-    bump_counter(metrics, METRIC_STABLEPROP);
+    bump_counter<CollectMetrics>(metrics, METRIC_STABLEPROP);
 
     {
         uint32_t contradiction = ad0 & ad1 & ad2 & al2 & al3 & ad4 & ad5 & ad6;
@@ -53,7 +53,7 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
 
     while (no_progress < 2) {
 
-        bump_counter(metrics, METRIC_DOMINO_RULE);
+        bump_counter<CollectMetrics>(metrics, METRIC_DOMINO_RULE);
         if (apply_domino_rule<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6)) {
             no_progress = 0;
             uint32_t contradiction = ad0 & ad1 & ad2 & al2 & al3 & ad4 & ad5 & ad6;
@@ -65,7 +65,7 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
 
         if (no_progress >= 2) { break; }
 
-        bump_counter(metrics, METRIC_DOMINO_RULE);
+        bump_counter<CollectMetrics>(metrics, METRIC_DOMINO_RULE);
         if (apply_domino_rule<true>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6)) {
             no_progress = 0;
             uint32_t contradiction = ad0 & ad1 & ad2 & al2 & al3 & ad4 & ad5 & ad6;
@@ -163,7 +163,7 @@ _DI_ bool apply_branched(Fn lambda, uint32_t mask, uint32_t *smem, uint32_t &ad0
  */
 _DI_ bool branched_stableprop(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
     return apply_branched([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
-        return stableprop(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
+        return stableprop<false>(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
     }, 0xffffffffu, smem, ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 }
 

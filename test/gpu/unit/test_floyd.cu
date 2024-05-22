@@ -19,7 +19,7 @@ __global__ void floyd_kernel(const uint32_t *input, int32_t *output) {
     uint4 ad6 = ad1;
     uint4 stator = ad0;
 
-    int result = kc::floyd_cycle(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, perturbation, px, py, 28, 28, 784);
+    int result = kc::floyd_cycle<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, perturbation, px, py, 28, 28, 784);
 
     if (threadIdx.x == 0) {
         output[blockIdx.x] = result;

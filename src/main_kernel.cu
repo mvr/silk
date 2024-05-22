@@ -68,7 +68,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     uint32_t px = hh::shuffle_32(metadata_y, 2);
     uint32_t py = hh::shuffle_32(metadata_y, 3);
     uint4 stator = ctx[threadIdx.x];
-    kc::shift_torus_inplace(stator, px, py);
+    kc::shift_torus_inplace(stator, -px, -py);
 
     // ********** INITIALISE SHARED MEMORY **********
 
@@ -89,10 +89,10 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         smem, metrics
     );
 
-    if (return_code == -1) { kc::bump_counter(metrics, METRIC_DEADEND); }
-    if (return_code ==  0) { kc::bump_counter(metrics, METRIC_FIZZLE); }
-    if (return_code ==  1) { kc::bump_counter(metrics, METRIC_RESTAB); }
-    if (return_code >=  2) { kc::bump_counter(metrics, METRIC_OSCILLATOR); }
+    if (return_code == -1) { kc::bump_counter<true>(metrics, METRIC_DEADEND); }
+    if (return_code ==  0) { kc::bump_counter<true>(metrics, METRIC_FIZZLE); }
+    if (return_code ==  1) { kc::bump_counter<true>(metrics, METRIC_RESTAB); }
+    if (return_code >=  2) { kc::bump_counter<true>(metrics, METRIC_OSCILLATOR); }
 
     // ********** HANDLE POTENTIAL SOLUTIONS **********
 

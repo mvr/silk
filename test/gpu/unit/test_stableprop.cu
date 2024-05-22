@@ -19,7 +19,7 @@ __global__ void stableprop_kernel(uint32_t *x) {
         __shared__ uint32_t smem[256];
         kc::branched_stableprop(smem, d0, d1, d2, l2, l3, d4, d5, d6);
     } else {
-        kc::stableprop(d0, d1, d2, l2, l3, d4, d5, d6);
+        kc::stableprop<false>(d0, d1, d2, l2, l3, d4, d5, d6);
     }
 
     x[offset] = d0;

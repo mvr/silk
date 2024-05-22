@@ -1,3 +1,4 @@
+template<bool CopyToSmem>
 _DI_ bool inplace_advance_unknown(
         uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
         uint32_t &not_low, uint32_t &not_high, uint32_t &not_stable,
@@ -113,7 +114,7 @@ _DI_ bool inplace_advance_unknown(
     uint32_t gad6 = ad6 | (forced_stable & unstable_d6); improvements |= (gad6 &~ ad6); ad6 = gad6;
 
     // store in smem if appropriate:
-    if (smem != nullptr) {
+    if constexpr (CopyToSmem) {
         smem[threadIdx.x] = unstable_d0;
         smem[threadIdx.x + 32] = unstable_d1;
         smem[threadIdx.x + 64] = unstable_d2;

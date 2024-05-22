@@ -37,7 +37,8 @@ def emit_case(state):
 
 def main():
 
-    src = '''_DI_ bool inplace_advance_unknown(
+    src = '''template<bool CopyToSmem>
+_DI_ bool inplace_advance_unknown(
         %s,
         uint32_t &not_low, uint32_t &not_high, uint32_t &not_stable,
         uint32_t stator, int max_width = 28, int max_height = 28, uint32_t max_pop = 784, uint32_t* smem = nullptr
@@ -91,7 +92,7 @@ def main():
 
     src += '''
     // store in smem if appropriate:
-    if (smem != nullptr) {
+    if constexpr (CopyToSmem) {
         smem[threadIdx.x] = unstable_d0;
         smem[threadIdx.x + 32] = unstable_d1;
         smem[threadIdx.x + 64] = unstable_d2;

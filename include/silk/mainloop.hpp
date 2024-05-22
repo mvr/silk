@@ -25,14 +25,14 @@ _DI_ int mainloop(
         uint32_t* smem, uint32_t* metrics
     ) {
 
-    bump_counter(metrics, METRIC_KERNEL);
+    bump_counter<true>(metrics, METRIC_KERNEL);
 
     int return_code = -3;
 
     while (return_code == -3) {
-        bool contradiction = branched_rollout(smem, ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, perturbation, stator.x, max_width, max_height, max_pop, gens, metrics);
+        bool contradiction = branched_rollout<true>(smem, ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, perturbation, stator.x, max_width, max_height, max_pop, gens, metrics);
         if (contradiction) { return_code = -1; break; }
-        return_code = floyd_cycle(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, perturbation, px, py, max_width, max_height, max_pop, metrics);
+        return_code = floyd_cycle<true>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, perturbation, px, py, max_width, max_height, max_pop, metrics);
     }
 
     return return_code;
@@ -45,7 +45,7 @@ _DI_ float hard_branch(
         uint32_t stator, int max_width, int max_height, int max_pop, uint32_t *smem, float epsilon, Fn lambda, uint32_t *metrics
     ) {
 
-    bump_counter(metrics, METRIC_HARDBRANCH);
+    bump_counter<true>(metrics, METRIC_HARDBRANCH);
 
     uint32_t not_stable = perturbation;
     uint32_t forced_dead = al2 & al3;
@@ -53,7 +53,7 @@ _DI_ float hard_branch(
     uint32_t not_low = (~not_stable) | forced_dead;
     uint32_t not_high = (~not_stable) | forced_live;
 
-    kc::inplace_advance_unknown(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop, smem);
+    kc::inplace_advance_unknown<true>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop, smem);
 
     uint32_t ambiguous = apply_min3(not_low, not_high, not_stable);
 
@@ -106,7 +106,7 @@ _DI_ float hard_branch(
         random_b *= population;
         random_b = random_b >> 22;
 
-        bump_counter(metrics, choose_random_lever ? METRIC_EXPLORE : METRIC_EXPLOIT);
+        bump_counter<true>(metrics, choose_random_lever ? METRIC_EXPLORE : METRIC_EXPLOIT);
     }
 
     uint32_t cell_idx = 0;
@@ -115,7 +115,7 @@ _DI_ float hard_branch(
         // only do the evaluation if we need to:
         if ((cell_idx == random_b) || (!choose_random_lever)) {
 
-            bump_counter(metrics, METRIC_NNUE);
+            bump_counter<true>(metrics, METRIC_NNUE);
 
             uint32_t ex = (dx + p) & 31;
             uint32_t ey = (dy + (p >> 5)) & 31;
