@@ -5,7 +5,7 @@
 #define COUNTER_SOLUTION_HEAD 34
 
 __global__ void __launch_bounds__(32, 16) computecellorbackup(
-        uint4* ctx, // common context for all problems
+        const uint4* ctx, // common context for all problems
         uint4* prb, // problem ring buffer
         uint32_t prb_size,
         uint4* srb, // solution ring buffer
@@ -13,7 +13,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         uint32_t srb_size,
         uint64_t* global_counters,
         int max_width, int max_height, int max_pop, int gens, int min_period,
-        float epsilon, const float4* nnue
+        uint32_t epsilon_threshold, const float4* nnue
     ) {
 
     // We use 5504 bytes (344 uint4s) to represent a pair of problems:
@@ -169,7 +169,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     float final_loss = kc::hard_branch(
         writing_location, perturbation, metadata_z,
         ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, stator.x,
-        max_width, max_height, max_pop, smem, epsilon,
+        max_width, max_height, max_pop, smem, epsilon_threshold,
         [&](uint32_t signature) __attribute__((always_inline)) {
             float loss = kc::evaluate_nnue(signature, nnue);
             return loss;
@@ -200,3 +200,16 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     __syncthreads();
     hh::atomic_add(global_counters + threadIdx.x, metrics[threadIdx.x]);
 }
+
+void run_main_kernel(int blocks_to_launch, const uint4* ctx, uint4* prb, uint32_t prb_size, uint4* srb, int32_t* smd, uint32_t srb_size, uint64_t* global_counters, 
+                        int max_width, int max_height, int max_pop, int gens, int min_period, double epsilon, const float4* nnue) {
+
+    // we convert the probability epsilon into an integer in [0, 2**22]
+    // as that is what the kernel expects:
+    uint32_t epsilon_threshold = ((uint32_t) (epsilon * 4194304.0));
+
+    // run the kernel:
+    computecellorbackup<<<blocks_to_launch, 32>>>(ctx, prb, prb_size, srb, smd, srb_size, global_counters, max_width, max_height, max_pop, gens, min_period, epsilon_threshold, nnue);
+
+}
+

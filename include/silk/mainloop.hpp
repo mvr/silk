@@ -42,7 +42,7 @@ template<typename Fn>
 _DI_ float hard_branch(
         uint4* writing_location, uint32_t perturbation, uint32_t &metadata_z,
         uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
-        uint32_t stator, int max_width, int max_height, int max_pop, uint32_t *smem, float epsilon, Fn lambda, uint32_t *metrics
+        uint32_t stator, int max_width, int max_height, int max_pop, uint32_t *smem, uint32_t epsilon_threshold, Fn lambda, uint32_t *metrics
     ) {
 
     bump_counter<true>(metrics, METRIC_HARDBRANCH);
@@ -92,8 +92,6 @@ _DI_ float hard_branch(
         random_a = hh::warp_add(random_a) >> 10;
         random_b = hh::warp_add(random_b) >> 10;
     }
-
-    uint32_t epsilon_threshold = ((uint32_t) (epsilon * 4194304.0f));
 
     // In the epsilon-greedy strategy for multi-armed bandit, we sometimes
     // (with probability epsilon) decide to choose a random lever instead
