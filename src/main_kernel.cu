@@ -4,16 +4,32 @@
 #define COUNTER_WRITING_HEAD 33
 #define COUNTER_SOLUTION_HEAD 34
 
+/**
+ * Main kernel that does the majority of the work.
+ */
 __global__ void __launch_bounds__(32, 16) computecellorbackup(
+
+        // device-side pointers:
         const uint4* ctx, // common context for all problems
         uint4* prb, // problem ring buffer
-        uint32_t prb_size,
         uint4* srb, // solution ring buffer
         int32_t* smd, // solution metadata
-        uint32_t srb_size,
         uint64_t* global_counters,
-        int max_width, int max_height, int max_pop, int gens, int min_period,
-        uint32_t epsilon_threshold, const float4* nnue
+        float4* nnue,
+
+        // buffer sizes:
+        uint32_t prb_size,
+        uint32_t srb_size,
+
+        // problem parameters:
+        int max_width,
+        int max_height,
+        int max_pop,
+        int rollout_gens,
+
+        // miscellaneous:
+        int min_period,
+        uint32_t epsilon_threshold
     ) {
 
     // We use 5504 bytes (344 uint4s) to represent a pair of problems:
@@ -85,7 +101,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     int return_code = kc::mainloop(
         ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator,
-        perturbation, px, py, max_width, max_height, max_pop, gens,
+        perturbation, px, py, max_width, max_height, max_pop, rollout_gens,
         smem, metrics
     );
 
@@ -112,8 +128,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         hh::atomic_add(global_counters + threadIdx.x, metrics[threadIdx.x]);
 
         if (return_code >= 0) {
-            // we have found a solution:
-
+            // we have found a solution; write it out:
             uint32_t solution_idx = 0;
             if (threadIdx.x == 0) {
                 solution_idx = hh::atomic_add(global_counters + COUNTER_SOLUTION_HEAD, 1) & (srb_size - 1);
@@ -121,28 +136,20 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
             }
             solution_idx = hh::shuffle_32(solution_idx, 0);
             uint4* solution_location = srb + 256 * ((uint64_t) solution_idx);
-
             kc::shift_torus_inplace(ad0, px, py);
             solution_location[threadIdx.x] = ad0;
-
             kc::shift_torus_inplace(ad1, px, py);
             solution_location[threadIdx.x + 32] = ad1;
-
             kc::shift_torus_inplace(ad2, px, py);
             solution_location[threadIdx.x + 64] = ad2;
-
             kc::shift_torus_inplace(al2, px, py);
             solution_location[threadIdx.x + 96] = al2;
-
             kc::shift_torus_inplace(al3, px, py);
             solution_location[threadIdx.x + 128] = al3;
-
             kc::shift_torus_inplace(ad4, px, py);
             solution_location[threadIdx.x + 160] = ad4;
-
             kc::shift_torus_inplace(ad5, px, py);
             solution_location[threadIdx.x + 192] = ad5;
-
             kc::shift_torus_inplace(ad6, px, py);
             solution_location[threadIdx.x + 224] = ad6;
         }
@@ -153,10 +160,10 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     uint32_t output_idx = 0;
     if (threadIdx.x == 0) {
-        output_idx = hh::atomic_add(global_counters + COUNTER_WRITING_HEAD, 1) & ((prb_size >> 1) - 1);
+        output_idx = hh::atomic_add(global_counters + COUNTER_WRITING_HEAD, 2) & (prb_size - 1);
     }
     output_idx = hh::shuffle_32(output_idx, 0);
-    uint4* writing_location = prb + uint4s_per_pp * output_idx;
+    uint4* writing_location = prb + uint4s_per_pp * (output_idx >> 1);
 
     uint32_t total_info = 0; // between 0 and 32768
     total_info += kc::save4(writing_location,       ad0.y, ad1.y, ad2.y, al2.y);
@@ -217,15 +224,90 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     hh::atomic_add(global_counters + threadIdx.x, metrics[threadIdx.x]);
 }
 
-void run_main_kernel(int blocks_to_launch, const uint4* ctx, uint4* prb, uint32_t prb_size, uint4* srb, int32_t* smd, uint32_t srb_size, uint64_t* global_counters, 
-                        int max_width, int max_height, int max_pop, int gens, int min_period, double epsilon, const float4* nnue) {
+/**
+ * Rather trivial kernel that produces training data from the
+ * output of computecellorbackup().
+ */
+__global__ void makennuedata(const uint4* prb, const uint64_t* global_counters, uint32_t* dataset, uint32_t prb_size) {
 
-    // we convert the probability epsilon into an integer in [0, 2**22]
-    // as that is what the kernel expects:
-    uint32_t epsilon_threshold = ((uint32_t) (epsilon * 4194304.0));
+    constexpr uint64_t uint4s_per_pp = 344;
 
-    // run the kernel:
-    computecellorbackup<<<blocks_to_launch, 32>>>(ctx, prb, prb_size, srb, smd, srb_size, global_counters, max_width, max_height, max_pop, gens, min_period, epsilon_threshold, nnue);
+    // get the location from which to read:
+    uint32_t pair_idx = global_counters[COUNTER_READING_HEAD] >> 1;
+    pair_idx -= (blockIdx.x + 1);
+    pair_idx &= ((prb_size >> 1) - 1);
 
+    __shared__ uint32_t metadata[32];
+
+    // load the metadata:
+    const uint32_t* metadata_location = ((const uint32_t*) (prb + pair_idx * uint4s_per_pp + 320));
+    metadata[threadIdx.x] = metadata_location[threadIdx.x];
+    __syncthreads();
+
+    uint32_t signature = metadata_location[threadIdx.x + 64];
+    if (threadIdx.x == 29) { signature = 0; }
+    if (threadIdx.x == 30) { signature = metadata[4]; }
+    if (threadIdx.x == 31) {
+        float total_loss = 0.0f;
+        uint32_t info_0 = metadata[5];
+        if (metadata[8]) {
+            uint32_t info_gain = hh::min(metadata[13] - info_0, ((uint32_t) 20));
+            float sub_loss = __int_as_float(metadata[12]);
+            sub_loss = hh::max(0.0f, hh::min(sub_loss, 1.0f));
+            total_loss += 0.375f + 0.125f * sub_loss - 0.015625f * info_gain;
+        }
+        if (metadata[16]) {
+            uint32_t info_gain = hh::min(metadata[21] - info_0, ((uint32_t) 20));
+            float sub_loss = __int_as_float(metadata[20]);
+            sub_loss = hh::max(0.0f, hh::min(sub_loss, 1.0f));
+            total_loss += 0.375f + 0.125f * sub_loss - 0.015625f * info_gain;
+        }
+        signature = __float_as_int(total_loss);
+    }
+
+    __syncthreads();
+    dataset[pair_idx * 32 + threadIdx.x] = signature;
 }
+
+struct SilkGPU {
+
+    // device-side pointers:
+    uint4* ctx;
+    uint4* prb; // problem ring buffer
+    uint4* srb; // solution ring buffer
+    int32_t* smd; // solution metadata
+    uint64_t* global_counters;
+    float4* nnue;
+    uint32_t* dataset;
+
+    // buffer sizes:
+    uint32_t prb_size;
+    uint32_t srb_size;
+
+    // problem parameters:
+    int max_width;
+    int max_height;
+    int max_pop;
+    int rollout_gens;
+
+    void run_main_kernel(int blocks_to_launch, int min_period, double epsilon) {
+
+        // we convert the probability epsilon into an integer in [0, 2**22]
+        // as that is what the kernel expects:
+        uint32_t epsilon_threshold = ((uint32_t) (epsilon * 4194304.0));
+
+        // run the kernel:
+        computecellorbackup<<<blocks_to_launch, 32>>>(
+            ctx, prb, srb, smd, global_counters, nnue,
+            prb_size, srb_size,
+            max_width, max_height, max_pop, rollout_gens,
+            min_period, epsilon_threshold
+        );
+
+        // extract training data into contiguous gmem:
+        makennuedata<<<blocks_to_launch / 2, 32>>>(
+            prb, global_counters, dataset, prb_size
+        );
+    }
+};
 

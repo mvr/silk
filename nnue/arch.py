@@ -1,5 +1,10 @@
+import os
 import torch
 import numpy as np
+import subprocess
+
+this_dir = os.path.dirname(os.path.abspath(__file__))
+build_dir = os.path.join(this_dir, '../build')
 
 class SilkNNUE(torch.nn.Module):
 
@@ -49,4 +54,27 @@ class SilkNNUE(torch.nn.Module):
         y3 = np.array([[x[3][i ^ (j >> 2), (j >> 2) ^ ((j & 3) << 4)] for j in range(128)] for i in range(16)], dtype=np.float32)
         yb = np.array([[p for i in range(32) for p in [x[2][i], x[4][i], x[5][0, i], x[5][0, i + 32]]]], dtype=np.float32)
 
-        return np.concatenate([y0, y1, y3, yb])
+        return np.concatenate([y1, y3, yb, y0])
+
+    def run_comparison(self, n_samples):
+
+        x = ((torch.randn((n_samples, 32)) * 10000).to(torch.int32) & 511) + 512 * torch.arange(32).to(torch.int32)
+        y_torch = self(x).cpu().detach().numpy().reshape(-1)
+
+        nnue_filename = os.path.join(build_dir, 'test_nnue.dat')
+        samples_filename = os.path.join(build_dir, 'test_samples.dat')
+        program_filename = os.path.join(build_dir, 'src/testnet')
+        output_filename = os.path.join(build_dir, 'test_outputs.dat')
+
+        with open(nnue_filename, 'wb') as f:
+            f.write(self.swizzle().tobytes())
+
+        with open(samples_filename, 'wb') as f:
+            f.write(x.cpu().detach().numpy().astype(np.uint32).tobytes())
+
+        subprocess.check_call([program_filename, nnue_filename, samples_filename, output_filename, str(n_samples)])
+
+        with open(output_filename, 'rb') as f:
+            y_cuda = np.frombuffer(f.read(), np.float32)
+
+        return y_cuda, y_torch

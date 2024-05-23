@@ -39,10 +39,13 @@ _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
     // first linear layer: 14848 --> 128
     float4 acc; acc.x = 0.0f; acc.y = 0.0f; acc.z = 0.0f; acc.w = 0.0f;
 
+    const float4* nnue_tid = nnue + threadIdx.x;
+    uint32_t sparse_row_offset = 16384 * threadIdx.x + 32 * signature + 1568;
+
     #pragma unroll 4
     for (int i = 0; i < 29; i++) {
-        uint32_t sig_i = hh::shuffle_32(signature, i);
-        float4 row = nnue[16384 * i + 32 * sig_i + threadIdx.x];
+        uint32_t sro_i = hh::shuffle_32(sparse_row_offset, i);
+        float4 row = nnue_tid[sro_i];
         acc.x += row.x;
         acc.y += row.y;
         acc.z += row.z;
@@ -56,13 +59,13 @@ _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
     acc.w = hh::max(acc.w, 0.0f);
 
     // load biases:
-    float4 biases = nnue[476672 + threadIdx.x];
+    float4 biases = nnue_tid[1536];
 
     // second linear layer: 128 --> 32
     float layer2 = biases.x;
     #pragma unroll 4
     for (int i = 0; i < 32; i++) {
-        float4 row = nnue[475136 + 32 * i + threadIdx.x];
+        float4 row = nnue_tid[32 * i];
         float ip = acc.x * row.x + acc.y * row.y + acc.z * row.z + acc.w * row.w;
         layer2 += hh::shuffle_xor_32(ip, i);
     }
@@ -76,8 +79,8 @@ _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
     // third linear layer: 64 --> 32
     float layer3 = biases.y;
     #pragma unroll 4
-    for (int i = 0; i < 16; i++) {
-        float4 row = nnue[476160 + 32 * i + threadIdx.x];
+    for (int i = 32; i < 48; i++) {
+        float4 row = nnue_tid[32 * i];
         float ip = acc.x * row.x + acc.y * row.y + acc.z * row.z + acc.w * row.w;
         layer3 += hh::shuffle_xor_32(ip, i);
     }
