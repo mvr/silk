@@ -78,3 +78,12 @@ class SilkNNUE(torch.nn.Module):
             y_cuda = np.frombuffer(f.read(), np.float32)
 
         return y_cuda, y_torch
+
+
+if __name__ == '__main__':
+
+    nnue = SilkNNUE()
+    y_cuda, y_torch = nnue.run_comparison(10000)
+    rms_err = np.sqrt(np.square(y_cuda - y_torch).mean() / np.square(y_torch).mean())
+    print('rms relative error: %.8f' % rms_err)
+    assert(rms_err <= 1.0e-6)

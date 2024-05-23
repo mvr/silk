@@ -290,6 +290,30 @@ struct SilkGPU {
     int max_pop;
     int rollout_gens;
 
+    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity) {
+        cudaMalloc((void**) &ctx, 512);
+        cudaMalloc((void**) &prb, 2752 * prb_capacity);
+        cudaMalloc((void**) &dataset, 64 * prb_capacity);
+        cudaMalloc((void**) &srb, 4096 * srb_capacity);
+        cudaMalloc((void**) &smd, 4 * srb_capacity);
+        cudaMalloc((void**) &global_counters, 512);
+        cudaMalloc((void**) &nnue, 7627264);
+
+        cudaMemset(ctx, 0, 512);
+        cudaMemset(global_counters, 0, 512);
+        cudaMemset(nnue, 0, 7627264);
+    }
+
+    ~SilkGPU() {
+        cudaFree(ctx);
+        cudaFree(prb);
+        cudaFree(srb);
+        cudaFree(smd);
+        cudaFree(global_counters);
+        cudaFree(nnue);
+        cudaFree(dataset);
+    }
+
     void run_main_kernel(int blocks_to_launch, int min_period, double epsilon) {
 
         // we convert the probability epsilon into an integer in [0, 2**22]

@@ -37,13 +37,16 @@ _HD_ void lane2coords(uint32_t lane, int32_t &x, int32_t &y) {
 _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
 
     // first linear layer: 14848 --> 128
-    float4 acc; acc.x = 0.0f; acc.y = 0.0f; acc.z = 0.0f; acc.w = 0.0f;
-
     const float4* nnue_tid = nnue + threadIdx.x;
     uint32_t sparse_row_offset = 16384 * threadIdx.x + 32 * signature + 1568;
 
+    // load contribution from centre cell:
+    uint32_t sro_28 = hh::shuffle_32(sparse_row_offset, 28);
+    float4 acc = nnue_tid[sro_28];
+
+    // add contributions from other 28 cells:
     #pragma unroll 4
-    for (int i = 0; i < 29; i++) {
+    for (int i = 0; i < 28; i++) {
         uint32_t sro_i = hh::shuffle_32(sparse_row_offset, i);
         float4 row = nnue_tid[sro_i];
         acc.x += row.x;
