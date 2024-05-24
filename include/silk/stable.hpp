@@ -83,13 +83,13 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
 /**
  * Apply soft branching on top of an arbitrary inference rule.
  */
-template<typename Fn>
+template<bool FixedPoint, typename Fn>
 _DI_ bool apply_branched(Fn lambda, uint32_t mask, uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
 
     uint32_t last_progress = 0;
     uint32_t p = 0;
 
-    while (p - last_progress < 1024) {
+    while (p < 1024 + last_progress) {
 
         uint32_t unknowns = mask &~ is_determined(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 
@@ -153,7 +153,9 @@ _DI_ bool apply_branched(Fn lambda, uint32_t mask, uint32_t *smem, uint32_t &ad0
         progress |= (ad5 &~ smem[threadIdx.x + 192]);
         progress |= (ad6 &~ smem[threadIdx.x + 224]);
 
-        if (hh::ballot_32(progress)) { last_progress = p; }
+        if constexpr (FixedPoint) {
+            if (hh::ballot_32(progress)) { last_progress = p; }
+        }
     }
 
     return false;
@@ -164,7 +166,7 @@ _DI_ bool apply_branched(Fn lambda, uint32_t mask, uint32_t *smem, uint32_t &ad0
  * stableprop with soft branching
  */
 _DI_ bool branched_stableprop(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
-    return apply_branched([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
+    return apply_branched<true>([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
         return stableprop<false>(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
     }, 0xffffffffu, smem, ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 }
@@ -174,7 +176,7 @@ _DI_ bool branched_stableprop(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint
  * This is for illustrative purposes only; do not use as it is really slow
  */
 _DI_ bool branched_stableprop2(uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6) {
-    return apply_branched([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
+    return apply_branched<true>([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
         return branched_stableprop(smem + 256, bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6);
     }, 0xffffffffu, smem, ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 }
