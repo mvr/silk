@@ -1,4 +1,5 @@
 #include <silk/mainloop.hpp>
+#include <silk/readrle.hpp>
 
 #define COUNTER_READING_HEAD 32
 #define COUNTER_WRITING_HEAD 33
@@ -280,6 +281,9 @@ struct SilkGPU {
     float4* nnue;
     uint32_t* dataset;
 
+    // host-side pointers:
+    uint64_t* host_counters;
+
     // buffer sizes:
     uint32_t prb_size;
     uint32_t srb_size;
@@ -299,9 +303,23 @@ struct SilkGPU {
         cudaMalloc((void**) &global_counters, 512);
         cudaMalloc((void**) &nnue, 7627264);
 
+        cudaMallocHost((void**) &host_counters, 512);
+
+        prb_size = prb_capacity;
+        srb_size = srb_capacity;
+
+        for (int i = 0; i < 64; i++) { host_counters[i] = 0; }
+        host_counters[COUNTER_WRITING_HEAD] = 2;
+
+        cudaMemcpy(global_counters, host_counters, 512, cudaMemcpyHostToDevice);
+
         cudaMemset(ctx, 0, 512);
-        cudaMemset(global_counters, 0, 512);
         cudaMemset(nnue, 0, 7627264);
+
+        max_width = 5;
+        max_height = 5;
+        max_pop = 10;
+        rollout_gens = 6;
     }
 
     ~SilkGPU() {
@@ -312,6 +330,12 @@ struct SilkGPU {
         cudaFree(global_counters);
         cudaFree(nnue);
         cudaFree(dataset);
+        cudaFreeHost(host_counters);
+    }
+
+    void inject_problem(std::vector<uint32_t> problem, std::vector<uint32_t> stator) {
+        cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
+        cudaMemcpy(prb, &(problem[0]), 5504, cudaMemcpyHostToDevice);
     }
 
     void run_main_kernel(int blocks_to_launch, int min_period, double epsilon) {
@@ -332,6 +356,77 @@ struct SilkGPU {
         makennuedata<<<blocks_to_launch / 2, 32>>>(
             prb, global_counters, dataset, prb_size
         );
+
+        cudaMemcpy(host_counters, global_counters, 512, cudaMemcpyDeviceToHost);
     }
 };
 
+void print_solution(const uint32_t* solution) {
+
+    uint64_t tmp[512];
+    for (int z = 0; z < 8; z++) {
+        for (int y = 0; y < 32; y++) {
+            tmp[64 * z + y]      = solution[128 * z + 4 * y    ] | (((uint64_t) solution[128 * z + 4 * y + 1]) << 32);
+            tmp[64 * z + y + 32] = solution[128 * z + 4 * y + 2] | (((uint64_t) solution[128 * z + 4 * y + 3]) << 32);
+        }
+    }
+
+    auto res = kc::complete_still_life(tmp, 4, true);
+
+    if (res.size() == 0) { return; }
+
+    for (int y = 0; y < 64; y++) {
+        for (int x = 0; x < 64; x++) {
+            std::cout << (((res[y] >> x) & 1) ? '*' : '.');
+        }
+        std::cout << std::endl;
+    }
+    std::cout << std::endl;
+}
+
+int main(int argc, char* argv[]) {
+
+    kc::ProblemHolder ph("examples/tl.rle");
+    auto problem = ph.swizzle_problem();
+    auto stator = ph.swizzle_stator();
+
+    SilkGPU silk(262144, 16384);
+
+    silk.inject_problem(problem, stator);
+
+    int problems = 2;
+
+    for (int j = 0; j < 120; j++) {
+        silk.run_main_kernel(problems, 11, 1.0);
+        for (int i = 0; i < 64; i++) {
+            std::cout << silk.host_counters[i] << " ";
+        }
+        std::cout << std::endl;
+        problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
+        if (problems == 0) { break; }
+    }
+
+    uint64_t solcount = silk.host_counters[COUNTER_SOLUTION_HEAD];
+
+    return 0;
+
+    if (solcount > 0) {
+        uint32_t* host_solutions;
+        int32_t* host_smd;
+        cudaMallocHost((void**) &host_solutions, 4096 * solcount);
+        cudaMallocHost((void**) &host_smd, 4 * solcount);
+
+        cudaMemcpy(host_solutions, silk.srb, 4096 * solcount, cudaMemcpyDeviceToHost);
+        cudaMemcpy(host_smd, silk.smd, 4 * solcount, cudaMemcpyDeviceToHost);
+
+        for (uint64_t i = 0; i < solcount; i++) {
+            std::cout << "***** found object with return code " << host_smd[i] << " *****" << std::endl;
+            print_solution(host_solutions + 1024 * i);
+        }
+
+        cudaFree(host_solutions);
+        cudaFree(host_smd);
+    }
+
+    return 0;
+}

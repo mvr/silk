@@ -22,10 +22,10 @@ _DI_ uint4 sum16(uint32_t ia, uint32_t ib) {
     }
 
     // 4 warp shuffles:
-    uint32_t al = kc::shift_plane<true,  1>(a);
-    uint32_t ar = kc::shift_plane<true, -1>(a);
-    uint32_t bl = kc::shift_plane<true,  1>(b);
-    uint32_t br = kc::shift_plane<true, -1>(b);
+    uint32_t al = kc::shift_plane<true,  1, SubtractOne>(a);
+    uint32_t ar = kc::shift_plane<true, -1, SubtractOne>(a);
+    uint32_t bl = kc::shift_plane<true,  1, SubtractOne>(b);
+    uint32_t br = kc::shift_plane<true, -1, SubtractOne>(b);
 
     uint32_t o2 = apply_maj3(al, ar, bl);
     uint32_t o1 = apply_xor3(al, ar, bl);
@@ -38,14 +38,14 @@ _DI_ uint4 sum16(uint32_t ia, uint32_t ib) {
     // the sum of this column of 3 is in {o2, p2, p1, br}
 
     // 8 shifts:
-    uint32_t o2u = kc::shift_plane<false,  1>(o2);
-    uint32_t p2u = kc::shift_plane<false,  1>(p2);
-    uint32_t p1u = kc::shift_plane<false,  1>(p1);
-    uint32_t bru = kc::shift_plane<false,  1>(br);
-    uint32_t o2d = kc::shift_plane<false, -1>(o2);
-    uint32_t p2d = kc::shift_plane<false, -1>(p2);
-    uint32_t p1d = kc::shift_plane<false, -1>(p1);
-    uint32_t brd = kc::shift_plane<false, -1>(br);
+    uint32_t o2u = kc::shift_plane<false,  1, SubtractOne>(o2);
+    uint32_t p2u = kc::shift_plane<false,  1, SubtractOne>(p2);
+    uint32_t p1u = kc::shift_plane<false,  1, SubtractOne>(p1);
+    uint32_t bru = kc::shift_plane<false,  1, SubtractOne>(br);
+    uint32_t o2d = kc::shift_plane<false, -1, SubtractOne>(o2);
+    uint32_t p2d = kc::shift_plane<false, -1, SubtractOne>(p2);
+    uint32_t p1d = kc::shift_plane<false, -1, SubtractOne>(p1);
+    uint32_t brd = kc::shift_plane<false, -1, SubtractOne>(br);
 
     uint32_t q2 = apply_maj3(bru, brd, br);
     uint32_t q1 = apply_xor3(bru, brd, br);

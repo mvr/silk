@@ -53,9 +53,9 @@ _DI_ bool branched_rollout(
 
     bump_counter<CollectMetrics>(metrics, METRIC_BRANCHING);
 
-    // obtain the 21-cell ZOI of perturbation:
+    // obtain the 9-cell ZOI of perturbation:
     uint32_t mask = perturbation;
-    mask = expand_plane<true, true>(mask);
+    // mask = expand_plane<true, true>(mask);
     mask = expand_plane<true, false>(mask);
     mask = expand_plane<false, true>(mask);
 

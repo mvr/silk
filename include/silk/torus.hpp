@@ -67,8 +67,10 @@ _DI_ uint4 shift_torus(uint4 a, int i, int j) {
     return b;
 }
 
-template<bool direction, int amount>
+template<bool direction, int amount, bool negated = false>
 _DI_ uint32_t shift_plane(uint32_t x) {
+
+    constexpr uint32_t smask = negated ? 0xffffffffu : 0u;
 
     // handle degenerate cases:
     if constexpr (amount == 0) { return x; }
@@ -79,18 +81,22 @@ _DI_ uint32_t shift_plane(uint32_t x) {
         int lid = threadIdx.x & 31;
         if constexpr (amount > 0) {
             uint32_t y = hh::shuffle_up_32(x, amount);
-            return (lid >= amount) ? y : 0;
+            return (lid >= amount) ? y : smask;
         } else {
             uint32_t y = hh::shuffle_down_32(x, -amount);
-            return (lid < 32 + amount) ? y : 0;
+            return (lid < 32 + amount) ? y : smask;
         }
     } else {
         // horizontal
+        uint32_t y = x;
+        if constexpr (smask) { y = ~y; }
         if constexpr (amount > 0) {
-            return (x << amount);
+            y = (y << amount);
         } else {
-            return (x >> (-amount));
+            y = (y >> (-amount));
         }
+        if constexpr (smask) { y = ~y; }
+        return y;
     }
 }
 
@@ -152,6 +158,8 @@ _DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, uint32_t stat
 }
 
 _DI_ uint32_t compute_next_cell(uint32_t mask, uint32_t p) {
+
+    // printf("Thread %d has mask %d.\n", threadIdx.x, mask);
 
     uint32_t u_ballot = hh::ballot_32(mask != 0);
 

@@ -25,7 +25,7 @@ template<bool CollectMetrics>
 _DI_ void bump_counter(uint32_t* metrics, int id) {
     if constexpr (CollectMetrics) {
         if (threadIdx.x == 0) {
-            atomicAdd(metrics, ((uint32_t) 1));
+            atomicAdd(metrics + id, ((uint32_t) 1));
         }
     }
 }

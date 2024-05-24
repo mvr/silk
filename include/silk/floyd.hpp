@@ -38,7 +38,11 @@ _DI_ int floyd_cycle(
 
             kc::inplace_advance_unknown<false>(ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, not_low, not_high, not_stable, stator.x, max_width, max_height, max_pop);
 
-            if (hh::ballot_32(not_low & not_high & not_stable)) {
+            uint32_t contradiction = not_low & not_high & not_stable;
+
+            // printf("Thread %d has contradiction %d\n", threadIdx.x, contradiction);
+
+            if (hh::ballot_32(contradiction)) {
                 generation = -1; break; // contradiction obtained
             }
 

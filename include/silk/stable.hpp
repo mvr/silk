@@ -94,6 +94,7 @@ _DI_ bool apply_branched(Fn lambda, uint32_t mask, uint32_t *smem, uint32_t &ad0
         uint32_t unknowns = mask &~ is_determined(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 
         p = compute_next_cell(unknowns, p);
+        // printf("Thread %d has p = %d\n", threadIdx.x, p);
         if (p == 0xffffffffu) { return false; }
 
         // push the parent state onto a shared memory 'stack':
