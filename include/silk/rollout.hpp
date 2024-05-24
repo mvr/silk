@@ -37,6 +37,7 @@ _DI_ bool run_rollout(
             bool contradiction = hh::ballot_32(not_low & not_high & not_stable);
             if (contradiction) { return true; }
             if (improved) { break; }
+            if (hh::ballot_32(not_stable) == 0) { break; }
         }
     }
 
