@@ -97,7 +97,7 @@ _DI_ int floyd_cycle(
             }
         }
 
-        if ((generation & 1) && (!in_cycle)) {
+        if (((generation & 1) == 0) && (!in_cycle)) {
             // rotate into reference frame of tortoise:
             uint32_t mx = qx - px;
             uint32_t my = qy - py;
@@ -121,6 +121,7 @@ _DI_ int floyd_cycle(
 
             kc::inplace_advance_unknown<false>(ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, not_low, not_high, not_stable, stator.x, max_width, max_height, max_pop);
             qerturbation = not_stable;
+            bump_counter<CollectMetrics>(metrics, METRIC_FLOYD_ITER);
 
             // rotate back again:
             shift_torus_inplace(ad0, mx, my);
