@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd -- "$( dirname -- "${BASH_SOURCE[0]}" )"
+
 echo "Checking dependencies..."
 
 if nvcc --version; then
@@ -34,4 +36,7 @@ cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j 8
 
-'test/gpu/gpu_unit_test'
+cd ..
+
+# build/src/silk
+build/test/gpu/gpu_unit_test
