@@ -120,9 +120,11 @@ _DI_ float hard_branch(
             uint32_t ex = (dx + p) & 31;
             uint32_t ey = (dy + (p >> 5)) & 31;
 
-            // compute a signature (29 values in the interval [0, 511]) that
+            // compute a signature (29 values in the interval [0, 255]) that
             // we evaluate with our custom function lambda:
             uint32_t signature = 0;
+
+            // incorporate stable state:
             signature += ((hh::shuffle_32(ad0, ey) >> ex) & 1);
             signature += ((hh::shuffle_32(ad1, ey) >> ex) & 1) * 2;
             signature += ((hh::shuffle_32(ad2, ey) >> ex) & 1) * 4;
@@ -131,7 +133,18 @@ _DI_ float hard_branch(
             signature += ((hh::shuffle_32(ad4, ey) >> ex) & 1) * 32;
             signature += ((hh::shuffle_32(ad5, ey) >> ex) & 1) * 64;
             signature += ((hh::shuffle_32(ad6, ey) >> ex) & 1) * 128;
-            signature += ((hh::shuffle_32(perturbation, ey) >> ex) & 1) * 256;
+
+            // incorporate perturbation:
+            bool active = ((hh::shuffle_32(perturbation, ey) >> ex) & 1);
+            if (active) {
+                uint32_t syndrome = 0xff ^ signature;
+                if (syndrome & (syndrome - 1)) {
+                    signature = 0xff;
+                } else {
+                    uint32_t magic = syndrome * syndrome * 0x7dcade;
+                    signature = (magic >> 16) & 0x66;
+                }
+            }
 
             // evaluate heuristic:
             float loss = lambda(signature);

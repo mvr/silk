@@ -295,7 +295,7 @@ struct SilkGPU {
     SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity) {
         cudaMalloc((void**) &ctx, 512);
         cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
-        cudaMalloc((void**) &dataset, 64 * prb_capacity);
+        cudaMalloc((void**) &dataset, 268435456);
         cudaMalloc((void**) &srb, 4096 * srb_capacity);
         cudaMalloc((void**) &smd, 4 * srb_capacity);
         cudaMalloc((void**) &global_counters, 512);
@@ -314,9 +314,9 @@ struct SilkGPU {
         cudaMemset(ctx, 0, 512);
         cudaMemset(nnue, 0, 7627264);
 
-        max_width = 5;
-        max_height = 5;
-        max_pop = 10;
+        max_width = 6;
+        max_height = 6;
+        max_pop = 12;
         rollout_gens = 6;
     }
 
@@ -388,14 +388,14 @@ int main(int argc, char* argv[]) {
     auto problem = ph.swizzle_problem();
     auto stator = ph.swizzle_stator();
 
-    SilkGPU silk(262144, 16384);
+    SilkGPU silk(524288, 16384);
 
     silk.inject_problem(problem, stator);
 
     int problems = 2;
 
-    for (int j = 0; j < 120; j++) {
-        silk.run_main_kernel(problems, 11, 1.0);
+    while (true) {
+        silk.run_main_kernel(problems, 25, 1.0);
         for (int i = 0; i < 64; i++) {
             std::cout << silk.host_counters[i] << " ";
         }
@@ -405,6 +405,28 @@ int main(int argc, char* argv[]) {
     }
 
     uint64_t solcount = silk.host_counters[COUNTER_SOLUTION_HEAD];
+    uint64_t ppcount = silk.host_counters[COUNTER_READING_HEAD] >> 1;
+
+    {
+        uint32_t* host_dataset;
+        cudaMallocHost((void**) &host_dataset, 128 * ppcount);
+        cudaMemcpy(host_dataset, silk.dataset, 128 * ppcount, cudaMemcpyDeviceToHost);
+
+        std::vector<uint64_t> nncounts(512);
+        for (uint64_t i = 1; i < ppcount; i++) {
+            for (uint64_t j = 0; j < 29; j++) {
+                nncounts[host_dataset[i * 32 + j]] += 1;
+            }
+        }
+
+        for (int i = 0; i < 512; i++) {
+            if (nncounts[i] != 0) {
+                std::cout << i << ": " << nncounts[i] << std::endl;
+            }
+        }
+
+        cudaFree(host_dataset);
+    }
 
     return 0;
 

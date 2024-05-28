@@ -12,7 +12,7 @@ class SilkNNUE(torch.nn.Module):
 
         super().__init__()
 
-        self.embedding = torch.nn.Embedding(14848, 128)
+        self.embedding = torch.nn.Embedding(7424, 128)
         self.layer2 = torch.nn.Linear(128, 32, bias=True)
         self.layer3 = torch.nn.Linear(64, 32, bias=True)
         self.layer4 = torch.nn.Linear(64, 1, bias=False)
@@ -42,7 +42,7 @@ class SilkNNUE(torch.nn.Module):
         x = [p.cpu().detach().numpy() for p in self.parameters()]
 
         assert len(x) == 6
-        assert tuple(x[0].shape) == (14848, 128)
+        assert tuple(x[0].shape) == (7424, 128)
         assert tuple(x[1].shape) == (32, 128)
         assert tuple(x[2].shape) == (32,)
         assert tuple(x[3].shape) == (32, 64)
@@ -58,7 +58,7 @@ class SilkNNUE(torch.nn.Module):
 
     def run_comparison(self, n_samples):
 
-        x = ((torch.randn((n_samples, 32)) * 10000).to(torch.int32) & 511) + 512 * torch.arange(32).to(torch.int32)
+        x = ((torch.randn((n_samples, 32)) * 10000).to(torch.int32) & 255) + 256 * torch.arange(32).to(torch.int32)
         y_torch = self(x).cpu().detach().numpy().reshape(-1)
 
         nnue_filename = os.path.join(build_dir, 'test_nnue.dat')

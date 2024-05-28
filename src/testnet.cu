@@ -10,7 +10,7 @@
 
 __global__ void testnet_kernel(const float4* nnue, const uint32_t* samples, float* output) {
 
-    uint32_t signature = samples[blockIdx.x * 32 + threadIdx.x] & 511;
+    uint32_t signature = samples[blockIdx.x * 32 + threadIdx.x] & 255;
     float loss = kc::evaluate_nnue(signature, nnue);
     if (threadIdx.x == 0) { output[blockIdx.x] = loss; }
 
@@ -34,18 +34,18 @@ int main(int argc, char* argv[]) {
     uint32_t* samples_h;
     float* outputs_h;
 
-    cudaMalloc((void**) &nnue_d, 7627264);
+    cudaMalloc((void**) &nnue_d, 3826176);
     cudaMalloc((void**) &samples_d, 128 * n_samples);
     cudaMalloc((void**) &outputs_d, 4 * n_samples);
 
-    cudaMallocHost((void**) &nnue_h, 7627264);
+    cudaMallocHost((void**) &nnue_h, 3826176);
     cudaMallocHost((void**) &samples_h, 128 * n_samples);
     cudaMallocHost((void**) &outputs_h, 4 * n_samples);
 
     {
         // load NNUE:
         FILE *fptr = fopen(argv[1], "r");
-        fread(nnue_h, 512, 14897, fptr);
+        fread(nnue_h, 512, 7473, fptr);
         fclose(fptr);
     }
 
@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
         fclose(fptr);
     }
 
-    cudaMemcpy(nnue_d, nnue_h, 7627264, cudaMemcpyHostToDevice);
+    cudaMemcpy(nnue_d, nnue_h, 3826176, cudaMemcpyHostToDevice);
     cudaMemcpy(samples_d, samples_h, 128 * n_samples, cudaMemcpyHostToDevice);
     testnet_kernel<<<n_samples, 32>>>(nnue_d, samples_d, outputs_d);
     cudaMemcpy(outputs_h, outputs_d, 4 * n_samples, cudaMemcpyDeviceToHost);

@@ -30,15 +30,15 @@ _HD_ void lane2coords(uint32_t lane, int32_t &x, int32_t &y) {
 /**
  * Evaluates the Silk NNUE on a signature of 29 uint9s.
  *
- * The Silk NNUE has 1906816 parameters of which 9984 are active.
+ * The Silk NNUE has 956544 parameters of which 9984 are active.
  * The parameters are stored contiguously in a GPU-resident array
- * of 7627264 bytes. This function accepts a pointer to that array.
+ * of 3826176 bytes. This function accepts a pointer to that array.
  */
 _DI_ float evaluate_nnue(uint32_t signature, const float4 *nnue) {
 
-    // first linear layer: 14848 --> 128
+    // first linear layer: 7424 --> 128
     const float4* nnue_tid = nnue + threadIdx.x;
-    uint32_t sparse_row_offset = 16384 * threadIdx.x + 32 * signature + 1568;
+    uint32_t sparse_row_offset = 8192 * threadIdx.x + 32 * signature + 1568;
 
     // load contribution from centre cell:
     uint32_t sro_28 = hh::shuffle_32(sparse_row_offset, 28);
