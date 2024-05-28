@@ -1,9 +1,6 @@
+#include "common.hpp"
 #include <silk/mainloop.hpp>
 #include <silk/readrle.hpp>
-
-#define COUNTER_READING_HEAD 32
-#define COUNTER_WRITING_HEAD 33
-#define COUNTER_SOLUTION_HEAD 34
 
 /**
  * Main kernel that does the majority of the work.
@@ -78,12 +75,28 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     kc::load4(reading_location + 96,  al3.z, ad4.z, ad5.z, ad6.z);
     kc::load4(reading_location + 128, ad0.w, ad1.w, ad2.w, al2.w);
     kc::load4(reading_location + 160, al3.w, ad4.w, ad5.w, ad6.w);
-    kc::load4(reading_location + 192 + block_parity * 64, ad0.x, ad1.x, ad2.x, al2.x);
-    kc::load4(reading_location + 224 + block_parity * 64, al3.x, ad4.x, ad5.x, ad6.x);
+    kc::load4(reading_location + 192, ad0.x, ad1.x, ad2.x, al2.x);
+    kc::load4(reading_location + 224, al3.x, ad4.x, ad5.x, ad6.x);
 
     // load stator constraints and shift into the correct reference frame:
     uint32_t px = hh::shuffle_32(metadata_y, 2);
     uint32_t py = hh::shuffle_32(metadata_y, 3);
+
+    {
+        uint32_t best_p = hh::shuffle_32(metadata_y, 30);
+        uint32_t contrib = hh::shuffle_32(metadata_y, 31);
+        if (block_parity & 1) { contrib ^= 255; }
+        uint32_t this_cell = (threadIdx.x == (best_p >> 5)) ? (1u << (best_p & 31)) : 0u;
+        if (contrib &   1) { ad0.x |= this_cell; }
+        if (contrib &   2) { ad1.x |= this_cell; }
+        if (contrib &   4) { ad2.x |= this_cell; }
+        if (contrib &   8) { al2.x |= this_cell; }
+        if (contrib &  16) { al3.x |= this_cell; }
+        if (contrib &  32) { ad4.x |= this_cell; }
+        if (contrib &  64) { ad5.x |= this_cell; }
+        if (contrib & 128) { ad6.x |= this_cell; }
+    }
+
     uint4 stator = ctx[threadIdx.x];
     kc::shift_torus_inplace(stator, -px, -py);
 
@@ -173,14 +186,8 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     total_info += kc::save4(writing_location + 96,  al3.z, ad4.z, ad5.z, ad6.z);
     total_info += kc::save4(writing_location + 128, ad0.w, ad1.w, ad2.w, al2.w);
     total_info += kc::save4(writing_location + 160, al3.w, ad4.w, ad5.w, ad6.w);
-    total_info += hh::popc32(ad0.x);
-    total_info += hh::popc32(ad1.x);
-    total_info += hh::popc32(ad2.x);
-    total_info += hh::popc32(al2.x);
-    total_info += hh::popc32(al3.x);
-    total_info += hh::popc32(ad4.x);
-    total_info += hh::popc32(ad5.x);
-    total_info += hh::popc32(ad6.x);
+    total_info += kc::save4(writing_location + 192, ad0.x, ad1.x, ad2.x, al2.x);
+    total_info += kc::save4(writing_location + 224, al3.x, ad4.x, ad5.x, ad6.x);
     total_info = hh::warp_add(total_info);
 
     __syncthreads();
@@ -189,8 +196,10 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     uint32_t metadata_z = 0;
 
+    uint32_t metadata_out = 0;
+
     float final_loss = kc::hard_branch(
-        writing_location, perturbation, metadata_z,
+        writing_location, perturbation, metadata_z, metadata_out,
         ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, stator.x,
         max_width, max_height, max_pop, smem, epsilon_threshold,
         [&](uint32_t signature) __attribute__((always_inline)) {
@@ -203,7 +212,6 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     uint32_t final_loss_bits = __float_as_int(final_loss);
 
-    uint32_t metadata_out = 0;
     if (threadIdx.x < 2) { metadata_out = 1; }
     if (threadIdx.x == 2) { metadata_out = px; }
     if (threadIdx.x == 3) { metadata_out = py; }

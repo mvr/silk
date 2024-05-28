@@ -42,7 +42,7 @@ _DI_ int mainloop(
 
 template<typename Fn>
 _DI_ float hard_branch(
-        uint4* writing_location, uint32_t perturbation, uint32_t &metadata_z,
+        uint4* writing_location, uint32_t perturbation, uint32_t &metadata_z, uint32_t &metadata_out,
         uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
         uint32_t stator, int max_width, int max_height, int max_pop, uint32_t *smem, uint32_t epsilon_threshold, Fn lambda, uint32_t *metrics
     ) {
@@ -148,48 +148,33 @@ _DI_ float hard_branch(
         cell_idx += 1;
     }
 
-    uint32_t this_cell = (1u << (best_p & 31));
-    this_cell = (threadIdx.x == ((best_p >> 5) & 31)) ? this_cell : 0u;
+    best_p &= 1023;
 
     // if a cell is unknown as to whether it's stable, then we
     // copy from smem; otherwise, we set to 0 for bd and 1 for bl:
-    uint32_t bd0 = unknown_if_stable & smem[threadIdx.x];
-    uint32_t bd1 = unknown_if_stable & smem[threadIdx.x + 32];
-    uint32_t bd2 = unknown_if_stable & smem[threadIdx.x + 64];
-    uint32_t bl2 = (~unknown_if_stable) | smem[threadIdx.x + 96];
-    uint32_t bl3 = (~unknown_if_stable) | smem[threadIdx.x + 128];
-    uint32_t bd4 = unknown_if_stable & smem[threadIdx.x + 160];
-    uint32_t bd5 = unknown_if_stable & smem[threadIdx.x + 192];
-    uint32_t bd6 = unknown_if_stable & smem[threadIdx.x + 224];
+    smem[threadIdx.x]       &=   unknown_if_stable;  // bd0
+    smem[threadIdx.x + 32]  &=   unknown_if_stable;  // bd1
+    smem[threadIdx.x + 64]  &=   unknown_if_stable;  // bd2
+    smem[threadIdx.x + 96]  |= (~unknown_if_stable); // bl2
+    smem[threadIdx.x + 128] |= (~unknown_if_stable); // bl3
+    smem[threadIdx.x + 160] &=   unknown_if_stable;  // bd4
+    smem[threadIdx.x + 192] &=   unknown_if_stable;  // bd5
+    smem[threadIdx.x + 224] &=   unknown_if_stable;  // bd6
 
-    kc::save4(
-        writing_location + 192,
-        ad0 | (this_cell & bd0),
-        ad1 | (this_cell & bd1),
-        ad2 | (this_cell & bd2),
-        al2 | (this_cell & bl2)
-    );
-    kc::save4(
-        writing_location + 224,
-        al3 | (this_cell & bl3),
-        ad4 | (this_cell & bd4),
-        ad5 | (this_cell & bd5),
-        ad6 | (this_cell & bd6)
-    );
-    kc::save4(
-        writing_location + 256,
-        ad0 | (this_cell &~ bd0),
-        ad1 | (this_cell &~ bd1),
-        ad2 | (this_cell &~ bd2),
-        al2 | (this_cell &~ bl2)
-    );
-    kc::save4(
-        writing_location + 288,
-        al3 | (this_cell &~ bl3),
-        ad4 | (this_cell &~ bd4),
-        ad5 | (this_cell &~ bd5),
-        ad6 | (this_cell &~ bd6)
-    );
+    __syncthreads();
+    int lane8 = threadIdx.x & 7;
+    uint32_t contrib = smem[(best_p >> 5) + 32 * lane8];
+    __syncthreads();
+
+    contrib >>= (best_p & 31);
+    contrib &= 1;
+    contrib <<= lane8;
+    contrib += hh::shuffle_xor_32(contrib, 1);
+    contrib += hh::shuffle_xor_32(contrib, 2);
+    contrib += hh::shuffle_xor_32(contrib, 4);
+
+    if (threadIdx.x == 31) { metadata_out = contrib; }
+    if (threadIdx.x == 30) { metadata_out = best_p; }
 
     return best_loss;
 }
