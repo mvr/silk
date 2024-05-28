@@ -114,7 +114,7 @@ struct ProblemHolder {
     }
 
     std::vector<uint32_t> swizzle_problem() {
-        std::vector<uint32_t> res(1376);
+        std::vector<uint32_t> res(1120);
 
         for (int z = 0; z < 8; z++) {
             for (int y = 0; y < 32; y++) {
@@ -124,14 +124,13 @@ struct ProblemHolder {
                 res[res_offset + 256]  = constraints[con_offset + 32];  // lower-left
                 res[res_offset + 512]  = constraints[con_offset + 32] >> 32; // lower-right
                 res[res_offset + 768]  = constraints[con_offset]; // upper-left
-                res[res_offset + 1024] = constraints[con_offset]; // upper-left
             }
         }
 
-        res[1280] = 1;
+        res[1024] = 1;
 
         for (int y = 0; y < 32; y++) {
-            res[1312 + y] = perturbation[y];
+            res[1056 + y] = perturbation[y];
         }
 
         return res;

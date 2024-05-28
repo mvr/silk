@@ -30,17 +30,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         uint32_t epsilon_threshold
     ) {
 
-    // We use 5504 bytes (344 uint4s) to represent a pair of problems:
-    //  -- bytes [0:5120]: stable information
-    //      -- bytes [0:1024]: upper-right quadrant
-    //      -- bytes [1024:2048]: lower-left quadrant
-    //      -- bytes [2048:3072]: lower-right quadrant
-    //      -- bytes [3072:4096]: upper-left quadrant in first problem
-    //      -- bytes [4096:5120]: upper-left quadrant in second problem
-    //  -- bytes [5120:5248]: metadata
-    //  -- bytes [5248:5376]: active perturbation
-    //  -- bytes [5376:5504]: signature of cell where split occurred
-    constexpr uint64_t uint4s_per_pp = 344;
+    constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
 
     // determine which problem to load:
     uint32_t logical_block_idx = 0;
@@ -54,7 +44,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     // ********** LOAD PROBLEM **********
 
     // load problem metadata:
-    uint32_t* problem_metadata_location = ((uint32_t*) (reading_location + 320));
+    uint32_t* problem_metadata_location = ((uint32_t*) (reading_location + (uint4s_per_pp - 24)));
     uint32_t metadata_y = problem_metadata_location[threadIdx.x];
 
     if (hh::shuffle_32(metadata_y, block_parity) == 0) {
@@ -223,7 +213,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         problem_metadata_location[threadIdx.x + 8 + 8 * block_parity] = metadata_out;
     }
 
-    uint32_t* solution_metadata_location = ((uint32_t*) (writing_location + 320));
+    uint32_t* solution_metadata_location = ((uint32_t*) (writing_location + (uint4s_per_pp - 24)));
     solution_metadata_location[threadIdx.x] = metadata_out;
     solution_metadata_location[threadIdx.x + 32] = perturbation;
     solution_metadata_location[threadIdx.x + 64] = metadata_z;
@@ -239,7 +229,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
  */
 __global__ void makennuedata(const uint4* prb, const uint64_t* global_counters, uint32_t* dataset, uint32_t prb_size) {
 
-    constexpr uint64_t uint4s_per_pp = 344;
+    constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
 
     // get the location from which to read:
     uint32_t pair_idx = global_counters[COUNTER_READING_HEAD] >> 1;
@@ -249,7 +239,7 @@ __global__ void makennuedata(const uint4* prb, const uint64_t* global_counters, 
     __shared__ uint32_t metadata[32];
 
     // load the metadata:
-    const uint32_t* metadata_location = ((const uint32_t*) (prb + pair_idx * uint4s_per_pp + 320));
+    const uint32_t* metadata_location = ((const uint32_t*) (prb + pair_idx * uint4s_per_pp + (uint4s_per_pp - 24)));
     metadata[threadIdx.x] = metadata_location[threadIdx.x];
     __syncthreads();
 
@@ -304,7 +294,7 @@ struct SilkGPU {
 
     SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity) {
         cudaMalloc((void**) &ctx, 512);
-        cudaMalloc((void**) &prb, 2752 * prb_capacity);
+        cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
         cudaMalloc((void**) &dataset, 64 * prb_capacity);
         cudaMalloc((void**) &srb, 4096 * srb_capacity);
         cudaMalloc((void**) &smd, 4 * srb_capacity);
@@ -343,7 +333,7 @@ struct SilkGPU {
 
     void inject_problem(std::vector<uint32_t> problem, std::vector<uint32_t> stator) {
         cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
-        cudaMemcpy(prb, &(problem[0]), 5504, cudaMemcpyHostToDevice);
+        cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES, cudaMemcpyHostToDevice);
     }
 
     void run_main_kernel(int blocks_to_launch, int min_period, double epsilon) {
