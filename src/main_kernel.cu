@@ -14,10 +14,13 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         int32_t* smd, // solution metadata
         uint64_t* global_counters,
         float4* nnue,
+        const uint32_t* freenodes,
+        uint64_t* hrb,
 
         // buffer sizes:
         uint32_t prb_size,
         uint32_t srb_size,
+        uint32_t hrb_size,
 
         // problem parameters:
         int max_width,
@@ -38,8 +41,8 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         logical_block_idx = hh::atomic_add(global_counters + COUNTER_READING_HEAD, 1) & (prb_size - 1);
     }
     logical_block_idx = hh::shuffle_32(logical_block_idx, 0);
-    uint4* reading_location = prb + uint4s_per_pp * (logical_block_idx >> 1);
     uint32_t block_parity = logical_block_idx & 1;
+    uint4* reading_location = prb + uint4s_per_pp * freenodes[logical_block_idx >> 1];
 
     // ********** LOAD PROBLEM **********
 
@@ -167,7 +170,8 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         output_idx = hh::atomic_add(global_counters + COUNTER_WRITING_HEAD, 2) & (prb_size - 1);
     }
     output_idx = hh::shuffle_32(output_idx, 0);
-    uint4* writing_location = prb + uint4s_per_pp * (output_idx >> 1);
+    output_idx = freenodes[output_idx >> 1];
+    uint4* writing_location = prb + uint4s_per_pp * output_idx;
 
     uint32_t total_info = 0; // between 0 and 32768
     total_info += kc::save4(writing_location,       ad0.y, ad1.y, ad2.y, al2.y);
@@ -181,6 +185,12 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     total_info = hh::warp_add(total_info);
 
     __syncthreads();
+
+    if (threadIdx.x == 0) {
+        uint32_t hrb_loc = hh::atomic_add(global_counters + COUNTER_HRB_WRITING_HEAD, 1) & (hrb_size - 1);
+        uint64_t entry = (((uint64_t) total_info) << 32) | output_idx;
+        hrb[hrb_loc] = entry;
+    }
 
     // ********** PERFORM HARD BRANCHING DECISION **********
 
@@ -278,13 +288,18 @@ struct SilkGPU {
     uint64_t* global_counters;
     float4* nnue;
     uint32_t* dataset;
+    uint32_t* freenodes;
+    uint64_t* hrb;
+    uint4* heap;
 
     // host-side pointers:
     uint64_t* host_counters;
+    uint32_t* host_freenodes;
 
     // buffer sizes:
     uint32_t prb_size;
     uint32_t srb_size;
+    uint32_t hrb_size;
 
     // problem parameters:
     int max_width;
@@ -292,7 +307,8 @@ struct SilkGPU {
     int max_pop;
     int rollout_gens;
 
-    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity) {
+    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t hrb_capacity) {
+
         cudaMalloc((void**) &ctx, 512);
         cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
         cudaMalloc((void**) &dataset, 268435456);
@@ -301,12 +317,22 @@ struct SilkGPU {
         cudaMalloc((void**) &global_counters, 512);
         cudaMalloc((void**) &nnue, 7627264);
 
+        cudaMalloc((void**) &freenodes, 2 * prb_capacity);
+        cudaMallocHost((void**) &host_freenodes, 2 * prb_capacity);
+
+        cudaMalloc((void**) &hrb, 8 * hrb_capacity);
+        cudaMalloc((void**) &heap, 8 * prb_capacity);
+
         cudaMallocHost((void**) &host_counters, 512);
 
         prb_size = prb_capacity;
         srb_size = srb_capacity;
+        hrb_size = hrb_capacity;
 
+        for (int i = 0; i < ((int) (prb_capacity >> 1)); i++) { host_freenodes[i] = i; }
         for (int i = 0; i < 64; i++) { host_counters[i] = 0; }
+
+        cudaMemcpy(freenodes, host_freenodes, 2 * prb_capacity, cudaMemcpyHostToDevice);
 
         cudaMemset(ctx, 0, 512);
         cudaMemset(nnue, 0, 7627264);
@@ -333,13 +359,14 @@ struct SilkGPU {
         int num_problems = (4 * problem.size()) / PROBLEM_PAIR_BYTES;
 
         host_counters[COUNTER_WRITING_HEAD] = 2 * num_problems;
+        host_counters[COUNTER_MIDDLE_HEAD] = 2 * num_problems;
 
         cudaMemcpy(global_counters, host_counters, 512, cudaMemcpyHostToDevice);
         cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
         cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
-    void run_main_kernel(int blocks_to_launch, int min_period, double epsilon) {
+    void run_main_kernel(int blocks_to_launch, int min_period, double epsilon, int max_batch_size) {
 
         // we convert the probability epsilon into an integer in [0, 2**22]
         // as that is what the kernel expects:
@@ -347,16 +374,20 @@ struct SilkGPU {
 
         // run the kernel:
         computecellorbackup<<<blocks_to_launch, 32>>>(
-            ctx, prb, srb, smd, global_counters, nnue,
-            prb_size, srb_size,
+            ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
+            prb_size, srb_size, hrb_size,
             max_width, max_height, max_pop, rollout_gens,
             min_period, epsilon_threshold
         );
 
+        /*
         // extract training data into contiguous gmem:
         makennuedata<<<blocks_to_launch / 2, 32>>>(
             prb, global_counters, dataset, prb_size
         );
+        */
+
+        enheap_then_deheap(hrb, global_counters, heap, hrb_size, max_batch_size >> 12, freenodes, prb_size);
 
         cudaMemcpy(host_counters, global_counters, 512, cudaMemcpyDeviceToHost);
     }
@@ -387,23 +418,25 @@ void print_solution(const uint32_t* solution, const uint64_t* perturbation) {
 
 int main(int argc, char* argv[]) {
 
-    kc::ProblemHolder ph("examples/eater.rle");
+    kc::ProblemHolder ph("examples/2c3.rle");
     auto problem = ph.swizzle_problem();
     auto stator = ph.swizzle_stator();
 
-    SilkGPU silk(524288, 16384);
+    SilkGPU silk(524288, 16384, 16384);
 
     silk.inject_problem(problem, stator);
 
-    int problems = 2;
+    int max_batch_size = 12288;
 
     while (true) {
-        silk.run_main_kernel(problems, 25, 1.0);
+        int problems = silk.host_counters[COUNTER_MIDDLE_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
+        int total_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
+        std::cout << "Open problems: \033[31;1m" << total_problems << "\033[0m" << std::endl;
+        silk.run_main_kernel(problems, 25, 1.0, max_batch_size);
         for (int i = 0; i < 64; i++) {
             std::cout << silk.host_counters[i] << " ";
         }
         std::cout << std::endl;
-        problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
         if (problems == 0) { break; }
     }
 
@@ -434,7 +467,7 @@ int main(int argc, char* argv[]) {
     }
     */
 
-    // return 0;
+    return 0;
 
     if (solcount > 0) {
         uint32_t* host_solutions;
