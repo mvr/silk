@@ -36,11 +36,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
 
     // determine which problem to load:
-    uint32_t logical_block_idx = 0;
-    if (threadIdx.x == 0) {
-        logical_block_idx = hh::atomic_add(global_counters + COUNTER_READING_HEAD, 1) & (prb_size - 1);
-    }
-    logical_block_idx = hh::shuffle_32(logical_block_idx, 0);
+    uint32_t logical_block_idx = (global_counters[COUNTER_READING_HEAD] + blockIdx.x) & (prb_size - 1);
     uint32_t block_parity = logical_block_idx & 1;
     uint4* reading_location = prb + uint4s_per_pp * freenodes[logical_block_idx >> 1];
 
@@ -337,9 +333,9 @@ struct SilkGPU {
         cudaMemset(ctx, 0, 512);
         cudaMemset(nnue, 0, 7627264);
 
-        max_width = 6;
-        max_height = 6;
-        max_pop = 12;
+        max_width = 8;
+        max_height = 8;
+        max_pop = 16;
         rollout_gens = 6;
     }
 
@@ -426,13 +422,19 @@ int main(int argc, char* argv[]) {
 
     silk.inject_problem(problem, stator);
 
-    int max_batch_size = 12288;
-
     while (true) {
         int problems = silk.host_counters[COUNTER_MIDDLE_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
         int total_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
-        std::cout << "Open problems: \033[31;1m" << total_problems << "\033[0m" << std::endl;
-        silk.run_main_kernel(problems, 25, 1.0, max_batch_size);
+
+        int lower_batch_size = 4096;
+        int upper_batch_size = silk.prb_size >> 4;
+        int medium_batch_size = ((3 * silk.prb_size) >> 5) - (total_problems >> 3);
+
+        int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
+        batch_size &= 0x7ffff000;
+
+        std::cout << "Open problems: \033[31;1m" << total_problems << "\033[0m; batch size: \033[32;1m" << batch_size << "\033[0m" << std::endl;
+        silk.run_main_kernel(problems, 9999, 1.0, batch_size);
         for (int i = 0; i < 64; i++) {
             std::cout << silk.host_counters[i] << " ";
         }
@@ -467,7 +469,7 @@ int main(int argc, char* argv[]) {
     }
     */
 
-    return 0;
+    // return 0;
 
     if (solcount > 0) {
         uint32_t* host_solutions;

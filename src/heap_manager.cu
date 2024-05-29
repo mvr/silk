@@ -44,6 +44,8 @@ __global__ void __launch_bounds__(1024, 1) deheap(const uint64_t* hrb, uint64_t*
 
     uint64_t middle_head = global_counters[COUNTER_MIDDLE_HEAD] >> 1;
 
+    global_counters[COUNTER_READING_HEAD] = middle_head << 1;
+
     int extra_values = hrb_end - hrb_start;
     int things_to_remove = hh::min(max_elements, heap_elements);
 
