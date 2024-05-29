@@ -307,9 +307,6 @@ struct SilkGPU {
         srb_size = srb_capacity;
 
         for (int i = 0; i < 64; i++) { host_counters[i] = 0; }
-        host_counters[COUNTER_WRITING_HEAD] = 2;
-
-        cudaMemcpy(global_counters, host_counters, 512, cudaMemcpyHostToDevice);
 
         cudaMemset(ctx, 0, 512);
         cudaMemset(nnue, 0, 7627264);
@@ -332,8 +329,14 @@ struct SilkGPU {
     }
 
     void inject_problem(std::vector<uint32_t> problem, std::vector<uint32_t> stator) {
+
+        int num_problems = (4 * problem.size()) / PROBLEM_PAIR_BYTES;
+
+        host_counters[COUNTER_WRITING_HEAD] = 2 * num_problems;
+
+        cudaMemcpy(global_counters, host_counters, 512, cudaMemcpyHostToDevice);
         cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
-        cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES, cudaMemcpyHostToDevice);
+        cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
     void run_main_kernel(int blocks_to_launch, int min_period, double epsilon) {
@@ -359,7 +362,7 @@ struct SilkGPU {
     }
 };
 
-void print_solution(const uint32_t* solution) {
+void print_solution(const uint32_t* solution, const uint64_t* perturbation) {
 
     uint64_t tmp[512];
     for (int z = 0; z < 8; z++) {
@@ -375,7 +378,7 @@ void print_solution(const uint32_t* solution) {
 
     for (int y = 0; y < 64; y++) {
         for (int x = 0; x < 64; x++) {
-            std::cout << (((res[y] >> x) & 1) ? '*' : '.');
+            std::cout << (((perturbation[y] >> x) & 1) ? 'o' : (((res[y] >> x) & 1) ? '*' : '.'));
         }
         std::cout << std::endl;
     }
@@ -384,7 +387,7 @@ void print_solution(const uint32_t* solution) {
 
 int main(int argc, char* argv[]) {
 
-    kc::ProblemHolder ph("examples/tl.rle");
+    kc::ProblemHolder ph("examples/eater.rle");
     auto problem = ph.swizzle_problem();
     auto stator = ph.swizzle_stator();
 
@@ -405,6 +408,8 @@ int main(int argc, char* argv[]) {
     }
 
     uint64_t solcount = silk.host_counters[COUNTER_SOLUTION_HEAD];
+
+    /*
     uint64_t ppcount = silk.host_counters[COUNTER_READING_HEAD] >> 1;
 
     {
@@ -427,8 +432,9 @@ int main(int argc, char* argv[]) {
 
         cudaFree(host_dataset);
     }
+    */
 
-    return 0;
+    // return 0;
 
     if (solcount > 0) {
         uint32_t* host_solutions;
@@ -441,7 +447,7 @@ int main(int argc, char* argv[]) {
 
         for (uint64_t i = 0; i < solcount; i++) {
             std::cout << "***** found object with return code " << host_smd[i] << " *****" << std::endl;
-            print_solution(host_solutions + 1024 * i);
+            print_solution(host_solutions + 1024 * i, &(ph.perturbation[0]));
         }
 
         cudaFree(host_solutions);
