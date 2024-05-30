@@ -303,7 +303,9 @@ struct SilkGPU {
     int max_pop;
     int rollout_gens;
 
-    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t hrb_capacity) {
+    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity) {
+
+        uint64_t hrb_capacity = prb_capacity >> 4;
 
         cudaMalloc((void**) &ctx, 512);
         cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
@@ -418,7 +420,7 @@ int main(int argc, char* argv[]) {
     auto problem = ph.swizzle_problem();
     auto stator = ph.swizzle_stator();
 
-    SilkGPU silk(524288, 16384, 16384);
+    SilkGPU silk(524288, 16384);
 
     silk.inject_problem(problem, stator);
 
@@ -427,7 +429,7 @@ int main(int argc, char* argv[]) {
         int total_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
         int lower_batch_size = 4096;
-        int upper_batch_size = silk.prb_size >> 4;
+        int upper_batch_size = (silk.prb_size >> 4) - 4096;
         int medium_batch_size = ((3 * silk.prb_size) >> 5) - (total_problems >> 3);
 
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
