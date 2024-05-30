@@ -24,3 +24,32 @@
 #define PROBLEM_PAIR_BYTES 4480
 
 void enheap_then_deheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size);
+
+void launch_main_kernel(
+    int blocks_to_launch,
+
+    // device-side pointers:
+    const uint4* ctx, // common context for all problems
+    uint4* prb, // problem ring buffer
+    uint4* srb, // solution ring buffer
+    int32_t* smd, // solution metadata
+    uint64_t* global_counters,
+    float4* nnue,
+    const uint32_t* freenodes,
+    uint64_t* hrb,
+
+    // buffer sizes:
+    uint32_t prb_size,
+    uint32_t srb_size,
+    uint32_t hrb_size,
+
+    // problem parameters:
+    int max_width,
+    int max_height,
+    int max_pop,
+    int rollout_gens,
+
+    // miscellaneous:
+    int min_period,
+    double epsilon
+);
