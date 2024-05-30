@@ -5,26 +5,24 @@
  * Rather trivial kernel that produces training data from the
  * output of computecellorbackup().
  */
-__global__ void makennuedata(const uint4* prb, const uint64_t* global_counters, uint32_t* dataset, uint32_t prb_size) {
+__global__ void makennuedata(const uint4* prb, const uint32_t* freenodes, const uint64_t* global_counters, uint8_t* dataset, uint32_t prb_size, uint32_t drb_size) {
 
     constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
 
     // get the location from which to read:
-    uint32_t pair_idx = global_counters[COUNTER_READING_HEAD] >> 1;
-    pair_idx -= (blockIdx.x + 1);
-    pair_idx &= ((prb_size >> 1) - 1);
+    uint32_t pair_idx = (global_counters[COUNTER_READING_HEAD] >> 1) + blockIdx.x;
+    uint32_t node_loc = freenodes[pair_idx & ((prb_size >> 1) - 1)];
+    pair_idx &= (drb_size - 1);
 
     __shared__ uint32_t metadata[32];
 
     // load the metadata:
-    const uint32_t* metadata_location = ((const uint32_t*) (prb + pair_idx * uint4s_per_pp + (uint4s_per_pp - 24)));
+    const uint32_t* metadata_location = ((const uint32_t*) (prb + node_loc * uint4s_per_pp + (uint4s_per_pp - 24)));
     metadata[threadIdx.x] = metadata_location[threadIdx.x];
     __syncthreads();
 
     uint32_t signature = metadata_location[threadIdx.x + 64];
-    if (threadIdx.x == 29) { signature = 0; }
-    if (threadIdx.x == 30) { signature = metadata[4]; }
-    if (threadIdx.x == 31) {
+    {
         float total_loss = 0.0f;
         uint32_t info_0 = metadata[5];
         if (metadata[8]) {
@@ -39,11 +37,15 @@ __global__ void makennuedata(const uint4* prb, const uint64_t* global_counters, 
             sub_loss = hh::max(0.0f, hh::min(sub_loss, 1.0f));
             total_loss += 0.375f + 0.125f * sub_loss - 0.015625f * info_gain;
         }
-        signature = __float_as_int(total_loss);
+        int32_t loss_bits = ((int32_t) (total_loss * 16777216.0f));
+        loss_bits = hh::max(((int32_t) 0), hh::min(loss_bits, ((int32_t) 0xffffff)));
+        if (threadIdx.x >= 29) {
+            signature = (loss_bits >> ((threadIdx.x - 29) * 8)) & 255;
+        }
     }
 
     __syncthreads();
-    dataset[pair_idx * 32 + threadIdx.x] = signature;
+    dataset[pair_idx * 32 + threadIdx.x] = ((uint8_t) signature);
 }
 
 struct SilkGPU {
@@ -55,7 +57,7 @@ struct SilkGPU {
     int32_t* smd; // solution metadata
     uint64_t* global_counters;
     float4* nnue;
-    uint32_t* dataset;
+    uint8_t* dataset;
     uint32_t* freenodes;
     uint64_t* hrb;
     uint4* heap;
@@ -68,6 +70,7 @@ struct SilkGPU {
     uint32_t prb_size;
     uint32_t srb_size;
     uint32_t hrb_size;
+    uint32_t drb_size;
 
     // problem parameters:
     int max_width;
@@ -75,13 +78,13 @@ struct SilkGPU {
     int max_pop;
     int rollout_gens;
 
-    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity) {
+    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t drb_capacity) {
 
         uint64_t hrb_capacity = prb_capacity >> 4;
 
         cudaMalloc((void**) &ctx, 512);
         cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
-        cudaMalloc((void**) &dataset, 268435456);
+        cudaMalloc((void**) &dataset, 32 * drb_capacity);
         cudaMalloc((void**) &srb, 4096 * srb_capacity);
         cudaMalloc((void**) &smd, 4 * srb_capacity);
         cudaMalloc((void**) &global_counters, 512);
@@ -98,6 +101,7 @@ struct SilkGPU {
         prb_size = prb_capacity;
         srb_size = srb_capacity;
         hrb_size = hrb_capacity;
+        drb_size = drb_capacity;
 
         for (int i = 0; i < ((int) (prb_capacity >> 1)); i++) { host_freenodes[i] = i; }
         for (int i = 0; i < 64; i++) { host_counters[i] = 0; }
@@ -107,9 +111,9 @@ struct SilkGPU {
         cudaMemset(ctx, 0, 512);
         cudaMemset(nnue, 0, 7627264);
 
-        max_width = 8;
-        max_height = 8;
-        max_pop = 16;
+        max_width = 6;
+        max_height = 6;
+        max_pop = 12;
         rollout_gens = 6;
     }
 
@@ -150,12 +154,10 @@ struct SilkGPU {
             min_period, epsilon_threshold
         );
 
-        /*
         // extract training data into contiguous gmem:
         makennuedata<<<blocks_to_launch / 2, 32>>>(
-            prb, global_counters, dataset, prb_size
+            prb, freenodes, global_counters, dataset, prb_size, drb_size
         );
-        */
 
         enheap_then_deheap(hrb, global_counters, heap, hrb_size, max_batch_size >> 12, freenodes, prb_size);
 
@@ -192,7 +194,7 @@ int main(int argc, char* argv[]) {
     auto problem = ph.swizzle_problem();
     auto stator = ph.swizzle_stator();
 
-    SilkGPU silk(524288, 16384);
+    SilkGPU silk(524288, 16384, 1048576);
 
     silk.inject_problem(problem, stator);
 
