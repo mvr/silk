@@ -80,7 +80,7 @@ class SilkNNUE(torch.nn.Module):
 
         return y_cuda, y_torch
 
-    def train_loop(self, mb_size=4096):
+    def train_loop(self, mb_size=4096, init_lr=0.002):
 
         self.cuda()
 
@@ -99,7 +99,7 @@ class SilkNNUE(torch.nn.Module):
 
         print("total samples = %d, stride = %d" % (l, s))
 
-        optimizer = torch.optim.Adam(self.parameters())
+        optimizer = torch.optim.Adam(self.parameters(), lr=init_lr, weight_decay=1.0e-5, eps=0.001)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(l // mb_size), eta_min=0)
 
         stuff = np.array([
@@ -151,6 +151,7 @@ class SilkNNUE(torch.nn.Module):
 if __name__ == '__main__':
 
     nnue = SilkNNUE()
+    nnue.embedding.weight.data.mul_(1.0e-4) # override bad initialisation
 
     nnue.train_loop()
 
