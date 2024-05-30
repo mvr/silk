@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 import subprocess
+from math import gcd
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 build_dir = os.path.join(this_dir, '../build')
@@ -79,10 +80,80 @@ class SilkNNUE(torch.nn.Module):
 
         return y_cuda, y_torch
 
+    def train_loop(self, mb_size=4096):
+
+        self.cuda()
+
+        dataset_filename = os.path.join(build_dir, '../dataset.bin')
+        with open(dataset_filename, 'rb') as f:
+            dataset = np.frombuffer(f.read(), np.uint8)
+        dataset = dataset.reshape(-1, 32)
+        print(dataset.shape)
+
+        l = int(dataset.shape[0])
+        s = int(l * (1.25 ** 0.5 - 0.5)) | 1
+        while gcd(l, s) > 1:
+            s += 2
+
+        assert(l % mb_size == 0)
+
+        print("total samples = %d, stride = %d" % (l, s))
+
+        optimizer = torch.optim.Adam(self.parameters())
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(l // mb_size), eta_min=0)
+
+        stuff = np.array([
+            [0, 1, 2, 3, 4, 5, 6, 7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 0, 0, 0],
+            [3, 2, 1, 0, 7, 6, 5, 4, 16, 19, 18, 17, 12, 15, 14, 13,  8, 11, 10,  9, 20, 23, 22, 21, 27, 26, 25, 24, 28, 0, 0, 0],
+            [1, 2, 3, 0, 5, 6, 7, 4,  9, 10, 11,  8, 13, 14, 15, 12, 17, 18, 19, 16, 21, 22, 23, 20, 25, 26, 27, 24, 28, 0, 0, 0],
+            [0, 3, 2, 1, 4, 7, 6, 5, 17, 16, 19, 18, 13, 12, 15, 14,  9,  8, 11, 10, 21, 20, 23, 22, 24, 27, 26, 25, 28, 0, 0, 0],
+            [2, 3, 0, 1, 6, 7, 4, 5, 10, 11,  8,  9, 14, 15, 12, 13, 18, 19, 16, 17, 22, 23, 20, 21, 26, 27, 24, 25, 28, 0, 0, 0],
+            [1, 0, 3, 2, 5, 4, 7, 6, 18, 17, 16, 19, 14, 13, 12, 15, 10,  9,  8, 11, 22, 21, 20, 23, 25, 24, 27, 26, 28, 0, 0, 0],
+            [3, 0, 1, 2, 7, 4, 5, 6, 11,  8,  9, 10, 15, 12, 13, 14, 19, 16, 17, 18, 23, 20, 21, 22, 27, 24, 25, 26, 28, 0, 0, 0],
+            [2, 1, 0, 3, 6, 5, 4, 7, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10,  9,  8, 23, 22, 21, 20, 26, 25, 24, 27, 28, 0, 0, 0]
+        ], dtype=np.uint32)[:, None, :] * 256
+
+        coeffs = np.array([[0.5 ** 24], [0.5 ** 16], [0.5 ** 8]], dtype=np.float32)
+        coeffs = torch.from_numpy(coeffs).cuda()
+
+        stuff = torch.from_numpy(stuff.astype(np.int32)).cuda()
+
+        for i in range(0, l, mb_size):
+
+            idxs = np.arange(i, i + mb_size)
+            idxs = (idxs * s) % l
+
+            optimizer.zero_grad()
+
+            batch = dataset[idxs].astype(np.int32) # upcast from uint8 to int32
+            batch = torch.from_numpy(batch).cuda()
+
+            x = (batch + stuff).reshape(-1, 32)
+            y = torch.matmul(x[:, -3:].to(torch.float32), coeffs)
+
+            y_pred = self(x)
+
+            loss = torch.square(y_pred - y).mean()
+            denom = torch.square(y - y.mean()).mean()
+
+            loss.backward()
+            print(('R^2 = %.2f' % (100.0 * (1.0 - (loss / denom).item()))) + '%')
+
+            optimizer.step()
+            scheduler.step()
+
+            # current_lr = scheduler.get_last_lr()[0]
+            # print('Current LR: %.8f' % current_lr)
+
+        self.cpu()
+
 
 if __name__ == '__main__':
 
     nnue = SilkNNUE()
+
+    nnue.train_loop()
+
     y_cuda, y_torch = nnue.run_comparison(10000)
     rms_err = np.sqrt(np.square(y_cuda - y_torch).mean() / np.square(y_torch).mean())
     print('rms relative error: %.8f' % rms_err)
