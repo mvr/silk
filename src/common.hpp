@@ -23,6 +23,8 @@
 //  -- bytes [4352:4480]: signature of cell where split occurred
 #define PROBLEM_PAIR_BYTES 4480
 
+#define NNUE_BYTES 3826176
+
 void enheap_then_deheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size);
 
 void launch_main_kernel(
