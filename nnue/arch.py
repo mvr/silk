@@ -80,7 +80,7 @@ class SilkNNUE(torch.nn.Module):
 
         return y_cuda, y_torch
 
-    def train_loop(self, mb_size=4096, init_lr=0.002):
+    def train_loop(self, mb_size=4096, init_lr=0.002, n_epochs=2):
 
         self.cuda()
 
@@ -99,8 +99,11 @@ class SilkNNUE(torch.nn.Module):
 
         print("total samples = %d, stride = %d" % (l, s))
 
+        # do two complete epochs over the data:
+        n_batches = (n_epochs * l) // mb_size
+
         optimizer = torch.optim.Adam(self.parameters(), lr=init_lr, weight_decay=1.0e-5, eps=0.001)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(l // mb_size), eta_min=0)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_batches, eta_min=0)
 
         stuff = np.array([
             [0, 1, 2, 3, 4, 5, 6, 7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 0, 0, 0],
@@ -118,10 +121,10 @@ class SilkNNUE(torch.nn.Module):
 
         stuff = torch.from_numpy(stuff.astype(np.int32)).cuda()
 
-        for i in range(0, l, mb_size):
+        idxs = np.array([(i * s) % l for i in range(mb_size)], dtype=np.int64)
+        s2 = (mb_size * s) % l
 
-            idxs = np.arange(i, i + mb_size)
-            idxs = (idxs * s) % l
+        for i in range(n_batches):
 
             optimizer.zero_grad()
 
@@ -130,8 +133,9 @@ class SilkNNUE(torch.nn.Module):
 
             x = (batch + stuff).reshape(-1, 32)
             y = torch.matmul(x[:, -3:].to(torch.float32), coeffs)
-
             y_pred = self(x)
+
+            idxs = (idxs + s2) % l
 
             loss = torch.square(y_pred - y).mean()
             denom = torch.square(y - y.mean()).mean()
@@ -151,7 +155,7 @@ class SilkNNUE(torch.nn.Module):
 if __name__ == '__main__':
 
     nnue = SilkNNUE()
-    nnue.embedding.weight.data.mul_(1.0e-4) # override bad initialisation
+    nnue.embedding.weight.data.mul_(1.0e-3) # override bad initialisation
 
     nnue.train_loop()
 
