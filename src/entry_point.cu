@@ -1,9 +1,8 @@
-#include "common.hpp"
-#include <silk/readrle.hpp>
+#include "cqueue.hpp"
 #include <stdio.h>
-#include <string>
 #include <chrono>
 #include <cstdarg>
+#include <thread>
 
 std::string format_string(const char* format, ...) {
     // Start with variadic arguments
@@ -91,6 +90,8 @@ struct SilkGPU {
     uint64_t* host_counters;
     uint32_t* host_freenodes;
     uint8_t* host_dataset;
+    uint32_t* host_srb;
+    int32_t* host_smd;
 
     // buffer sizes:
     uint32_t prb_size;
@@ -105,6 +106,8 @@ struct SilkGPU {
     int rollout_gens;
 
     uint64_t drb_hwm;
+
+    uint64_t perturbation[64];
 
     SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t drb_capacity,
             int active_width, int active_height, int active_pop) {
@@ -122,6 +125,8 @@ struct SilkGPU {
         cudaMalloc((void**) &freenodes, 2 * prb_capacity);
         cudaMallocHost((void**) &host_freenodes, 2 * prb_capacity);
         cudaMallocHost((void**) &host_dataset, 32 * drb_capacity);
+        cudaMallocHost((void**) &host_srb, 4096 * srb_capacity);
+        cudaMallocHost((void**) &host_smd, 4 * srb_capacity);
 
         cudaMalloc((void**) &hrb, 8 * hrb_capacity);
         cudaMalloc((void**) &heap, 8 * prb_capacity);
@@ -162,6 +167,8 @@ struct SilkGPU {
         cudaFreeHost(host_counters);
         cudaFreeHost(host_dataset);
         cudaFreeHost(host_freenodes);
+        cudaFreeHost(host_srb);
+        cudaFreeHost(host_smd);
     }
 
     void inject_problem(std::vector<uint32_t> problem, std::vector<uint32_t> stator) {
@@ -220,82 +227,7 @@ struct SilkGPU {
     }
 };
 
-void print_solution(const uint32_t* solution, const uint64_t* perturbation) {
-
-    uint64_t tmp[512];
-    for (int z = 0; z < 8; z++) {
-        for (int y = 0; y < 32; y++) {
-            tmp[64 * z + y]      = solution[128 * z + 4 * y    ] | (((uint64_t) solution[128 * z + 4 * y + 1]) << 32);
-            tmp[64 * z + y + 32] = solution[128 * z + 4 * y + 2] | (((uint64_t) solution[128 * z + 4 * y + 3]) << 32);
-        }
-    }
-
-    auto res = kc::complete_still_life(tmp, 4, true);
-
-    if (res.size() == 0) { return; }
-
-    for (int y = 0; y < 64; y++) {
-        for (int x = 0; x < 64; x++) {
-            std::cout << (((perturbation[y] >> x) & 1) ? 'o' : (((res[y] >> x) & 1) ? '*' : '.'));
-        }
-        std::cout << std::endl;
-    }
-    std::cout << std::endl;
-}
-
-int main(int argc, char* argv[]) {
-
-    size_t free_mem = 0;
-    size_t total_mem = 0;
-
-    if (hh::reportCudaError(cudaMemGetInfo(&free_mem, &total_mem))) {
-        return 1;
-    }
-
-    std::cerr << "Memory statistics: " << free_mem << " free; " << total_mem << " total." << std::endl;
-
-    if (free_mem < ((size_t) (1 << 28))) {
-        std::cerr << "Silk requires at least 256 MiB of free GPU memory to run correctly." << std::endl;
-        return 1;
-    }
-
-    // these probably don't need changing:
-    size_t srb_capacity = 16384;
-    size_t drb_capacity = 1048576;
-    free_mem -= (srb_capacity + 4096) * 4096;
-    free_mem -= drb_capacity * 32;
-
-    // calculate maximum prb_capacity that fits in free memory:
-    size_t prb_capacity = free_mem / 2304;
-    prb_capacity = 1 << hh::constexpr_log2(prb_capacity);
-
-    std::cerr << "prb_capacity = " << prb_capacity << std::endl;
-
-    int active_width = 7;
-    int active_height = 7;
-    int active_pop = 14;
-    kc::ProblemHolder ph("examples/2c3.rle");
-
-    auto problem = ph.swizzle_problem();
-    auto stator = ph.swizzle_stator();
-
-    SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
-
-    {
-        uint4* nnue_h;
-        cudaMallocHost((void**) &nnue_h, NNUE_BYTES);
-        // load NNUE:
-        FILE *fptr = fopen("nnue/nnue_399M.dat", "r");
-        fread(nnue_h, 512, 7473, fptr);
-        fclose(fptr);
-        cudaMemcpy(silk.nnue, nnue_h, NNUE_BYTES, cudaMemcpyHostToDevice);
-        cudaFreeHost(nnue_h);
-    }
-
-    silk.inject_problem(problem, stator);
-
-    FILE* fptr = nullptr;
-    // fptr = fopen("dataset.bin", "w");
+void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* solution_queue, PrintQueue* print_queue, FILE* fptr) {
 
     auto t0 = std::chrono::high_resolution_clock::now();
     auto t1 = t0;
@@ -305,13 +237,9 @@ int main(int argc, char* argv[]) {
 
     int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
-    std::cout << "+---------+-----------------------------------+---------+---------+-------------------+-------------------+" << std::endl;
-    std::cout << "| elapsed |           problems                | current | rollout | speed (Mprob/sec) |     solutions     |" << std::endl;
-    std::cout << "|  clock  +---------------+-------------------+  batch  |   per   +---------+---------+---------+---------+" << std::endl;
-    std::cout << "|   time  |     solved    |  open (pct full)  |   size  | problem | current | overall | oscill. | fizzles |" << std::endl;
-    std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+" << std::endl;
-
     uint64_t next_elapsed_secs = 1;
+
+    uint64_t last_solution_count = 0;
 
     while (open_problems) {
         int problems = silk.host_counters[COUNTER_MIDDLE_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
@@ -363,18 +291,18 @@ int main(int argc, char* argv[]) {
                 elapsed_increment = (elapsed_secs >= 60) ? 30 : ((elapsed_secs >= 10) ? 5 : 1);
             }
 
-            std::string status_string;
+            PrintMessage pm; pm.message_type = MESSAGE_STATUS_STRING;
 
             if ((elapsed_secs == 0) || (open_problems == 0)) {
                 double elapsed_time = ((double) total_usecs) / (1.0e6 * ((double) denom));
-                status_string += format_string("|%6.2f %c |", elapsed_time, time_specifier);
+                pm.contents += format_string("|%6.2f %c |", elapsed_time, time_specifier);
             } else {
                 next_elapsed_secs += elapsed_increment;
                 unsigned long long elapsed_time = elapsed_secs / denom;
-                status_string += format_string("| %4d %c  |", elapsed_time, time_specifier);
+                pm.contents += format_string("| %4d %c  |", elapsed_time, time_specifier);
             }
 
-            status_string += format_string("%14llu | %8llu (%5.2f%%) | %7llu | %7.3f | %7.3f | %7.3f | %7llu | %7llu |",
+            pm.contents += format_string("%14llu | %8llu (%5.2f%%) | %7llu | %7.3f | %7.3f | %7.3f | %7llu | %7llu |",
                 ((unsigned long long) last_problems),
                 ((unsigned long long) open_problems),
                 (100.0 * open_problems / silk.prb_size),
@@ -385,17 +313,127 @@ int main(int argc, char* argv[]) {
                 ((unsigned long long) (silk.host_counters[COUNTER_SOLUTION_HEAD] - silk.host_counters[METRIC_FIZZLE])),
                 ((unsigned long long) silk.host_counters[METRIC_FIZZLE])
             );
-            std::cout << status_string << std::endl;
+
+            print_queue->enqueue(pm);
+        }
+
+        while (silk.host_counters[COUNTER_SOLUTION_HEAD] > last_solution_count) {
+            uint64_t next_solution_count = silk.host_counters[COUNTER_SOLUTION_HEAD];
+            if ((next_solution_count / silk.srb_size) > (last_solution_count / silk.srb_size)) {
+                next_solution_count = ((last_solution_count / silk.srb_size) + 1) * silk.srb_size;
+            }
+            uint64_t solcount = next_solution_count - last_solution_count;
+            uint64_t starting_idx = last_solution_count % silk.srb_size;
+
+            last_solution_count = next_solution_count;
+
+            cudaMemcpy(silk.host_srb, silk.srb + 256 * starting_idx, 4096 * solcount, cudaMemcpyDeviceToHost);
+            cudaMemcpy(silk.host_smd, silk.smd + 4 * starting_idx, 4 * solcount, cudaMemcpyDeviceToHost);
+
+            for (uint64_t i = 0; i < solcount; i++) {
+                SolutionMessage sm;
+                sm.message_type = MESSAGE_SOLUTION_STRING;
+                sm.return_code = silk.host_smd[i];
+                for (uint64_t j = 0; j < 1024; j++) {
+                    sm.solution[j] = silk.host_srb[1024 * i + j];
+                }
+                for (uint64_t j = 0; j < 64; j++) {
+                    sm.perturbation[j] = perturbation[j];
+                }
+                solution_queue->enqueue(sm);
+            }
         }
     }
+}
 
-    std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+" << std::endl;
+int main(int argc, char* argv[]) {
+
+    size_t free_mem = 0;
+    size_t total_mem = 0;
+
+    if (hh::reportCudaError(cudaMemGetInfo(&free_mem, &total_mem))) {
+        return 1;
+    }
+
+    std::cerr << "Memory statistics: " << free_mem << " free; " << total_mem << " total." << std::endl;
+
+    if (free_mem < ((size_t) (1 << 28))) {
+        std::cerr << "Silk requires at least 256 MiB of free GPU memory to run correctly." << std::endl;
+        return 1;
+    }
+
+    // these probably don't need changing:
+    size_t srb_capacity = 16384;
+    size_t drb_capacity = 1048576;
+    free_mem -= (srb_capacity + 4096) * 4096;
+    free_mem -= drb_capacity * 32;
+
+    // calculate maximum prb_capacity that fits in free memory:
+    size_t prb_capacity = free_mem / 2304;
+    prb_capacity = 1 << hh::constexpr_log2(prb_capacity);
+
+    std::cerr << "prb_capacity = " << prb_capacity << std::endl;
+
+    int num_cadical_threads = 8;
+    int active_width = 7;
+    int active_height = 7;
+    int active_pop = 14;
+    kc::ProblemHolder ph("examples/2c3.rle");
+
+    auto problem = ph.swizzle_problem();
+    auto stator = ph.swizzle_stator();
+
+    SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
+
+    {
+        uint4* nnue_h;
+        cudaMallocHost((void**) &nnue_h, NNUE_BYTES);
+        // load NNUE:
+        FILE *fptr = fopen("nnue/nnue_399M.dat", "r");
+        fread(nnue_h, 512, 7473, fptr);
+        fclose(fptr);
+        cudaMemcpy(silk.nnue, nnue_h, NNUE_BYTES, cudaMemcpyHostToDevice);
+        cudaFreeHost(nnue_h);
+    }
+
+    silk.inject_problem(problem, stator);
+
+    SolutionQueue solution_queue;
+    PrintQueue print_queue;
+
+    std::thread print_thread(print_thread_loop, &print_queue);
+    std::vector<std::thread> cadical_threads;
+
+    for (int i = 0; i < num_cadical_threads; i++) {
+        cadical_threads.emplace_back(solution_thread_loop, &solution_queue, &print_queue);
+    }
+
+    FILE* fptr = nullptr;
+    // fptr = fopen("dataset.bin", "w");
+
+    run_main_loop(silk, &(ph.perturbation[0]), &solution_queue, &print_queue, fptr);
 
     if (fptr != nullptr) { fclose(fptr); }
 
-    uint64_t solcount = silk.host_counters[COUNTER_SOLUTION_HEAD];
+    for (int i = 0; i < num_cadical_threads; i++) {
+        SolutionMessage sm;
+        sm.message_type = MESSAGE_KILL_THREAD;
+        solution_queue.enqueue(sm);
+    }
 
-    // return 0;
+    for (int i = 0; i < num_cadical_threads; i++) {
+        cadical_threads[i].join();
+    }
+
+    {
+        PrintMessage pm;
+        pm.message_type = MESSAGE_KILL_THREAD;
+        print_queue.enqueue(pm);
+        print_thread.join();
+    }
+
+    /*
+    uint64_t solcount = silk.host_counters[COUNTER_SOLUTION_HEAD];
 
     if (solcount > 0) {
         uint32_t* host_solutions;
@@ -414,6 +452,7 @@ int main(int argc, char* argv[]) {
         cudaFree(host_solutions);
         cudaFree(host_smd);
     }
+    */
 
     return 0;
 }
