@@ -4,3 +4,6 @@
 [submodule "cpads"]
 	path = cpads
 	url = https://gitlab.com/hatsya/open-source/cpads.git
+[submodule "concurrentqueue"]
+	path = concurrentqueue
+	url = https://github.com/cameron314/concurrentqueue.git
