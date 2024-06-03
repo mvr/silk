@@ -82,7 +82,8 @@ struct SilkGPU {
 
     uint64_t drb_hwm;
 
-    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t drb_capacity) {
+    SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t drb_capacity,
+            int active_width, int active_height, int active_pop) {
 
         uint64_t hrb_capacity = prb_capacity >> 4;
 
@@ -116,9 +117,9 @@ struct SilkGPU {
         cudaMemset(ctx, 0, 512);
         cudaMemset(nnue, 0, NNUE_BYTES);
 
-        max_width = 8; // 7;
-        max_height = 8; // 7;
-        max_pop = 12; // 14;
+        max_width = active_width;
+        max_height = active_height;
+        max_pop = active_pop;
         rollout_gens = 6;
         drb_hwm = 0;
     }
@@ -152,7 +153,12 @@ struct SilkGPU {
         cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
-    void run_main_kernel(int blocks_to_launch, int min_period, double epsilon, int max_batch_size, FILE* fptr = nullptr) {
+    void run_main_kernel(int blocks_to_launch, int min_period, int max_batch_size, FILE* fptr = nullptr) {
+
+        // if we are generating training data, then explore more
+        // (75% random + 25% NNUE); otherwise, mostly follow the
+        // neural network (5% random + 95% NNUE).
+        double epsilon = (fptr == nullptr) ? 0.05 : 0.75;
 
         // run the kernel:
         launch_main_kernel(blocks_to_launch,
@@ -215,14 +221,41 @@ void print_solution(const uint32_t* solution, const uint64_t* perturbation) {
 
 int main(int argc, char* argv[]) {
 
-    // proportion of time in which we make random decisions:
-    double epsilon = 0.25;
+    size_t free_mem = 0;
+    size_t total_mem = 0;
 
-    kc::ProblemHolder ph("examples/eater.rle");
+    if (hh::reportCudaError(cudaMemGetInfo(&free_mem, &total_mem))) {
+        return 1;
+    }
+
+    std::cerr << "Memory statistics: " << free_mem << " free; " << total_mem << " total." << std::endl;
+
+    if (free_mem < ((size_t) (1 << 28))) {
+        std::cerr << "Silk requires at least 256 MiB of free GPU memory to run correctly." << std::endl;
+        return 1;
+    }
+
+    // these probably don't need changing:
+    size_t srb_capacity = 16384;
+    size_t drb_capacity = 1048576;
+    free_mem -= (srb_capacity + 4096) * 4096;
+    free_mem -= drb_capacity * 32;
+
+    // calculate maximum prb_capacity that fits in free memory:
+    size_t prb_capacity = free_mem / 2304;
+    prb_capacity = 1 << hh::constexpr_log2(prb_capacity);
+
+    std::cerr << "prb_capacity = " << prb_capacity << std::endl;
+
+    int active_width = 7;
+    int active_height = 7;
+    int active_pop = 14;
+    kc::ProblemHolder ph("examples/2c3.rle");
+
     auto problem = ph.swizzle_problem();
     auto stator = ph.swizzle_stator();
 
-    SilkGPU silk(524288, 16384, 1048576);
+    SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
 
     {
         uint4* nnue_h;
@@ -237,7 +270,8 @@ int main(int argc, char* argv[]) {
 
     silk.inject_problem(problem, stator);
 
-    // FILE* fptr = fopen("dataset.bin", "w");
+    FILE* fptr = nullptr;
+    // fptr = fopen("dataset.bin", "w");
 
     while (true) {
         int problems = silk.host_counters[COUNTER_MIDDLE_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
@@ -251,7 +285,7 @@ int main(int argc, char* argv[]) {
         batch_size &= 0x7ffff000;
 
         std::cout << "Open problems: \033[31;1m" << total_problems << "\033[0m; batch size: \033[32;1m" << batch_size << "\033[0m" << std::endl;
-        silk.run_main_kernel(problems, 9999, epsilon, batch_size);
+        silk.run_main_kernel(problems, 9999, batch_size, fptr);
         for (int i = 0; i < 64; i++) {
             std::cout << silk.host_counters[i] << " ";
         }
@@ -259,7 +293,7 @@ int main(int argc, char* argv[]) {
         if (problems == 0) { break; }
     }
 
-    // fclose(fptr);
+    if (fptr != nullptr) { fclose(fptr); }
 
     uint64_t solcount = silk.host_counters[COUNTER_SOLUTION_HEAD];
 
