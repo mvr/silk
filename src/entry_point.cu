@@ -1,6 +1,30 @@
 #include "common.hpp"
 #include <silk/readrle.hpp>
 #include <stdio.h>
+#include <string>
+#include <chrono>
+#include <cstdarg>
+
+std::string format_string(const char* format, ...) {
+    // Start with variadic arguments
+    va_list args;
+    va_start(args, format);
+
+    // Determine the size needed to hold the formatted string
+    int size = vsnprintf(nullptr, 0, format, args);
+    va_end(args);
+
+    // Create a buffer of the required size
+    std::vector<char> buffer(size + 1); // +1 for null terminator
+
+    // Print to the buffer
+    va_start(args, format);
+    vsnprintf(buffer.data(), buffer.size(), format, args);
+    va_end(args);
+
+    // Create a std::string from the buffer
+    return std::string(buffer.data());
+}
 
 /**
  * Rather trivial kernel that produces training data from the
@@ -273,25 +297,99 @@ int main(int argc, char* argv[]) {
     FILE* fptr = nullptr;
     // fptr = fopen("dataset.bin", "w");
 
-    while (true) {
+    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t1 = t0;
+    auto t2 = t0;
+
+    uint64_t last_problems = silk.host_counters[COUNTER_READING_HEAD];
+
+    int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
+
+    std::cout << "+---------+-----------------------------------+---------+---------+-------------------+-------------------+" << std::endl;
+    std::cout << "| elapsed |           problems                | current | rollout | speed (Mprob/sec) |     solutions     |" << std::endl;
+    std::cout << "|  clock  +---------------+-------------------+  batch  |   per   +---------+---------+---------+---------+" << std::endl;
+    std::cout << "|   time  |     solved    |  open (pct full)  |   size  | problem | current | overall | oscill. | fizzles |" << std::endl;
+    std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+" << std::endl;
+
+    uint64_t next_elapsed_secs = 1;
+
+    while (open_problems) {
         int problems = silk.host_counters[COUNTER_MIDDLE_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
-        int total_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
         int lower_batch_size = 4096;
         int upper_batch_size = (silk.prb_size >> 4) - 4096;
-        int medium_batch_size = ((3 * silk.prb_size) >> 5) - (total_problems >> 3);
+        int medium_batch_size = ((3 * silk.prb_size) >> 5) - (open_problems >> 3);
 
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
         batch_size &= 0x7ffff000;
 
-        std::cout << "Open problems: \033[31;1m" << total_problems << "\033[0m; batch size: \033[32;1m" << batch_size << "\033[0m" << std::endl;
         silk.run_main_kernel(problems, 9999, batch_size, fptr);
-        for (int i = 0; i < 64; i++) {
-            std::cout << silk.host_counters[i] << " ";
+
+        t2 = std::chrono::high_resolution_clock::now();
+
+        auto total_usecs = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t0).count();
+        open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
+
+        uint64_t elapsed_secs = total_usecs / 1000000;
+
+        if ((elapsed_secs == 0) || (open_problems == 0) || (elapsed_secs >= next_elapsed_secs)) {
+
+            auto usecs = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+            double total_mprobs_per_sec    = ((double) silk.host_counters[COUNTER_READING_HEAD]) / ((double) total_usecs);
+            double current_mprobs_per_sec  = ((double) (silk.host_counters[COUNTER_READING_HEAD] - last_problems)) / ((double) usecs);
+
+            t1 = t2;
+            last_problems = silk.host_counters[COUNTER_READING_HEAD];
+
+            char time_specifier;
+            uint64_t denom;
+            uint64_t elapsed_increment;
+
+            if (elapsed_secs >= 1209600) { // 336 hours --> 14 days
+                time_specifier = 'd';
+                denom = 86400;
+                elapsed_increment = 86400;
+            } else if (elapsed_secs >= 28800) { // 480 minutes --> 8 hours
+                time_specifier = 'h';
+                denom = 3600;
+                elapsed_increment = (elapsed_secs >= 172800) ? 14400 : 3600;
+            } else if (elapsed_secs >= 600) { // 600 seconds --> 10 minutes
+                time_specifier = 'm';
+                denom = 60;
+                elapsed_increment = (elapsed_secs >= 7200) ? 900 : ((elapsed_secs >= 1800) ? 300 : 60);
+            } else {
+                time_specifier = 's';
+                denom = 1;
+                elapsed_increment = (elapsed_secs >= 60) ? 30 : ((elapsed_secs >= 10) ? 5 : 1);
+            }
+
+            std::string status_string;
+
+            if ((elapsed_secs == 0) || (open_problems == 0)) {
+                double elapsed_time = ((double) total_usecs) / (1.0e6 * ((double) denom));
+                status_string += format_string("|%6.2f %c |", elapsed_time, time_specifier);
+            } else {
+                next_elapsed_secs += elapsed_increment;
+                unsigned long long elapsed_time = elapsed_secs / denom;
+                status_string += format_string("| %4d %c  |", elapsed_time, time_specifier);
+            }
+
+            status_string += format_string("%14llu | %8llu (%5.2f%%) | %7llu | %7.3f | %7.3f | %7.3f | %7llu | %7llu |",
+                ((unsigned long long) last_problems),
+                ((unsigned long long) open_problems),
+                (100.0 * open_problems / silk.prb_size),
+                ((unsigned long long) problems),
+                ((double) (silk.host_counters[METRIC_ROLLOUT])) / last_problems,
+                current_mprobs_per_sec,
+                total_mprobs_per_sec,
+                ((unsigned long long) (silk.host_counters[COUNTER_SOLUTION_HEAD] - silk.host_counters[METRIC_FIZZLE])),
+                ((unsigned long long) silk.host_counters[METRIC_FIZZLE])
+            );
+            std::cout << status_string << std::endl;
         }
-        std::cout << std::endl;
-        if (problems == 0) { break; }
     }
+
+    std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+" << std::endl;
 
     if (fptr != nullptr) { fclose(fptr); }
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cpads/core.hpp>
+#include <silk/metrics.hpp>
 
 #define COUNTER_READING_HEAD 32
 #define COUNTER_MIDDLE_HEAD  33
