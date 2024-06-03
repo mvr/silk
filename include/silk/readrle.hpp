@@ -96,21 +96,53 @@ inline std::vector<uint32_t> expand_cells(const std::vector<uint32_t> &cells) {
 
 inline void swizzle_subproblem(uint32_t* res, const uint64_t* constraints, const uint64_t* perturbation) {
 
+    int miny = 0; int maxy = 63;
+    while (perturbation[miny] == 0) { miny += 1; }
+    while (perturbation[maxy] == 0) { maxy -= 1; }
+    uint64_t q = 0;
+    for (int y = 0; y < 64; y++) {
+        q |= perturbation[y];
+    }
+    int minx = 0; int maxx = 63;
+    while (((q >> minx) & 1) == 0) { minx += 1; }
+    while (((q >> maxx) & 1) == 0) { maxx -= 1; }
+
+    int px = (((maxx + minx) >> 1) - 16) & 63;
+    int py = (((maxy + miny) >> 1) - 16) & 63;
+
+    uint64_t per[64];
+
+    for (int y = 0; y < 64; y++) {
+        int oy = (y + py) & 63;
+        per[y] = perturbation[oy];
+        per[y] = (per[y] >> (px & 63)) | (per[y] << ((-px) & 63));
+    }
+
     for (int z = 0; z < 8; z++) {
+
+        uint64_t con[64];
+
+        for (int y = 0; y < 64; y++) {
+            int oy = (y + py) & 63;
+            con[y] = constraints[oy + z * 64];
+            con[y] = (con[y] >> (px & 63)) | (con[y] << ((-px) & 63));
+        }
+
         for (int y = 0; y < 32; y++) {
             int res_offset = 4 * y + (z & 3) + (z & 4) * 32;
-            int con_offset = 64 * z + y;
-            res[res_offset]        = constraints[con_offset] >> 32; // upper-right
-            res[res_offset + 256]  = constraints[con_offset + 32];  // lower-left
-            res[res_offset + 512]  = constraints[con_offset + 32] >> 32; // lower-right
-            res[res_offset + 768]  = constraints[con_offset]; // upper-left
+            res[res_offset]        = con[y] >> 32; // upper-right
+            res[res_offset + 256]  = con[y + 32];  // lower-left
+            res[res_offset + 512]  = con[y + 32] >> 32; // lower-right
+            res[res_offset + 768]  = con[y]; // upper-left
         }
     }
 
     res[1024] = 1;
+    res[1026] = px;
+    res[1027] = py;
 
     for (int y = 0; y < 32; y++) {
-        res[1056 + y] = perturbation[y];
+        res[1056 + y] = per[y];
     }
 }
 

@@ -348,6 +348,8 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
 
 int main(int argc, char* argv[]) {
 
+    // ***** CHECK CUDA IS WORKING CORRECTLY *****
+
     size_t free_mem = 0;
     size_t total_mem = 0;
 
@@ -374,11 +376,23 @@ int main(int argc, char* argv[]) {
 
     std::cerr << "prb_capacity = " << prb_capacity << std::endl;
 
+    // ***** PARSE ARGUMENTS *****
+
     int num_cadical_threads = 8;
     int active_width = 7;
     int active_height = 7;
     int active_pop = 14;
     kc::ProblemHolder ph("examples/2c3.rle");
+
+    int ppc = 0;
+    for (int i = 0; i < 64; i++) { ppc += hh::popc64(ph.perturbation[i]); }
+
+    if (ppc == 0) {
+        std::cerr << "Pattern file has zero live cells in initial perturbation." << std::endl;
+        return 1;
+    } else {
+        std::cerr << "Initial perturbation population: " << ppc << std::endl;
+    }
 
     auto problem = ph.swizzle_problem();
     auto stator = ph.swizzle_stator();
@@ -415,6 +429,8 @@ int main(int argc, char* argv[]) {
 
     if (fptr != nullptr) { fclose(fptr); }
 
+    // ***** TEAR DOWN THREADS *****
+
     for (int i = 0; i < num_cadical_threads; i++) {
         SolutionMessage sm;
         sm.message_type = MESSAGE_KILL_THREAD;
@@ -431,28 +447,6 @@ int main(int argc, char* argv[]) {
         print_queue.enqueue(pm);
         print_thread.join();
     }
-
-    /*
-    uint64_t solcount = silk.host_counters[COUNTER_SOLUTION_HEAD];
-
-    if (solcount > 0) {
-        uint32_t* host_solutions;
-        int32_t* host_smd;
-        cudaMallocHost((void**) &host_solutions, 4096 * solcount);
-        cudaMallocHost((void**) &host_smd, 4 * solcount);
-
-        cudaMemcpy(host_solutions, silk.srb, 4096 * solcount, cudaMemcpyDeviceToHost);
-        cudaMemcpy(host_smd, silk.smd, 4 * solcount, cudaMemcpyDeviceToHost);
-
-        for (uint64_t i = 0; i < solcount; i++) {
-            std::cout << "***** found object with return code " << host_smd[i] << " *****" << std::endl;
-            print_solution(host_solutions + 1024 * i, &(ph.perturbation[0]));
-        }
-
-        cudaFree(host_solutions);
-        cudaFree(host_smd);
-    }
-    */
 
     return 0;
 }
