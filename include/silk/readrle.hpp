@@ -18,7 +18,6 @@ inline std::string readFileIntoString(const std::string& path) {
     std::string line;
     std::ostringstream rlestream;
     while (std::getline(input_file, line)) {
-        // std::cout << line << std::endl;
         if (line.empty() || (line[0] == '#')) {
             continue;
         }
@@ -168,7 +167,7 @@ struct ProblemHolder {
 
         num_subproblems = cells.size() >> 12;
 
-        std::cout << "# Loaded " << num_subproblems << " subproblems." << std::endl;
+        std::cerr << "Info: loaded " << num_subproblems << " subproblems." << std::endl;
 
         for (int z = 0; z < num_subproblems; z++) {
 

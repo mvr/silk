@@ -346,7 +346,24 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
     }
 }
 
-int main(int argc, char* argv[]) {
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads) {
+
+    // ***** LOAD PROBLEM *****
+
+    kc::ProblemHolder ph("examples/eater.rle");
+
+    int ppc = 0;
+    for (int i = 0; i < 64; i++) { ppc += hh::popc64(ph.perturbation[i]); }
+
+    if (ppc == 0) {
+        std::cerr << "Error: pattern file has zero live cells in initial perturbation." << std::endl;
+        return 1;
+    } else {
+        std::cerr << "Info: initial perturbation has " << ppc << " cells." << std::endl;
+    }
+
+    auto problem = ph.swizzle_problem();
+    auto stator = ph.swizzle_stator();
 
     // ***** CHECK CUDA IS WORKING CORRECTLY *****
 
@@ -354,13 +371,14 @@ int main(int argc, char* argv[]) {
     size_t total_mem = 0;
 
     if (hh::reportCudaError(cudaMemGetInfo(&free_mem, &total_mem))) {
+        std::cerr << "Error: Silk aborting due to irrecoverable GPU error." << std::endl;
         return 1;
     }
 
-    std::cerr << "Memory statistics: " << free_mem << " free; " << total_mem << " total." << std::endl;
+    std::cerr << "Info: GPU memory statistics: " << free_mem << " bytes free; " << total_mem << " bytes total." << std::endl;
 
     if (free_mem < ((size_t) (1 << 28))) {
-        std::cerr << "Silk requires at least 256 MiB of free GPU memory to run correctly." << std::endl;
+        std::cerr << "Error: Silk requires at least 256 MiB of free GPU memory to run correctly." << std::endl;
         return 1;
     }
 
@@ -374,28 +392,7 @@ int main(int argc, char* argv[]) {
     size_t prb_capacity = free_mem / 2304;
     prb_capacity = 1 << hh::constexpr_log2(prb_capacity);
 
-    std::cerr << "prb_capacity = " << prb_capacity << std::endl;
-
-    // ***** PARSE ARGUMENTS *****
-
-    int num_cadical_threads = 8;
-    int active_width = 7;
-    int active_height = 7;
-    int active_pop = 14;
-    kc::ProblemHolder ph("examples/2c3.rle");
-
-    int ppc = 0;
-    for (int i = 0; i < 64; i++) { ppc += hh::popc64(ph.perturbation[i]); }
-
-    if (ppc == 0) {
-        std::cerr << "Pattern file has zero live cells in initial perturbation." << std::endl;
-        return 1;
-    } else {
-        std::cerr << "Initial perturbation population: " << ppc << std::endl;
-    }
-
-    auto problem = ph.swizzle_problem();
-    auto stator = ph.swizzle_stator();
+    std::cerr << "Info: allocating ring buffer to accommodate " << prb_capacity << " open problems." << std::endl;
 
     SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
 
@@ -403,7 +400,13 @@ int main(int argc, char* argv[]) {
         uint4* nnue_h;
         cudaMallocHost((void**) &nnue_h, NNUE_BYTES);
         // load NNUE:
-        FILE *fptr = fopen("nnue/nnue_399M.dat", "r");
+        FILE *fptr = fopen(nnue_filename.c_str(), "r");
+
+        if (fptr == nullptr) {
+            std::cerr << "Error: failed to load NNUE from file " << nnue_filename << std::endl;
+            return 1;
+        }
+
         fread(nnue_h, 512, 7473, fptr);
         fclose(fptr);
         cudaMemcpy(silk.nnue, nnue_h, NNUE_BYTES, cudaMemcpyHostToDevice);
