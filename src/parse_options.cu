@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "../cxxopts/include/cxxopts.hpp"
 
 int main(int argc, char* argv[]) {
 
@@ -11,15 +12,36 @@ int main(int argc, char* argv[]) {
     std::string nnue_filename = silk_filename + "_nnue.dat";
     std::cerr << "Info: Silk invoked as " << silk_filename << std::endl;
 
-    // ***** PARSE ARGUMENTS *****
+    // define argument parser
+    cxxopts::Options options("silk", "A CUDA drifter searcher");
 
-    int active_width = 8;
-    int active_height = 8;
-    int active_pop = 16;
+    options.add_options()
 
-    std::string input_filename = "examples/eater.rle";
-    int num_cadical_threads = 8;
+        // positional arguments (obligatory)
+        ("input_filename", "LifeHistory RLE specifying the problem", cxxopts::value<std::string>())
+        ("max_active_width", "maximum width of active region", cxxopts::value<int>())
+        ("max_active_height", "maximum height of active region", cxxopts::value<int>())
+        ("max_active_cells", "maximum number of active cells", cxxopts::value<int>())
 
+        // optional arguments
+        ("cadicals", "number of CaDiCaL threads to stabilise results", cxxopts::value<int>()->default_value("8"))
+    ;
+
+    options.parse_positional({"input_filename", "max_active_width", "max_active_height", "max_active_cells"});
+
+    // apply argument parser to cmdline args
+    auto result = options.parse(argc, argv);
+
+    // extract positional arguments
+    std::string input_filename = result["input_filename"].as<std::string>();
+    int active_width = result["max_active_width"].as<int>();
+    int active_height = result["max_active_height"].as<int>();
+    int active_pop = result["max_active_cells"].as<int>();
+
+    // extract optional arguments
+    int num_cadical_threads = result["cadicals"].as<int>();
+
+    // run program
     int return_code = silk_main(
         active_width,
         active_height,
