@@ -350,7 +350,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     // ***** LOAD PROBLEM *****
 
-    kc::ProblemHolder ph("examples/eater.rle");
+    kc::ProblemHolder ph(input_filename);
 
     int ppc = 0;
     for (int i = 0; i < 64; i++) { ppc += hh::popc64(ph.perturbation[i]); }
