@@ -227,7 +227,7 @@ struct SilkGPU {
     }
 };
 
-void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* solution_queue, PrintQueue* print_queue, FILE* fptr) {
+void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* solution_queue, PrintQueue* print_queue, FILE* fptr, int min_report_period) {
 
     auto t0 = std::chrono::high_resolution_clock::now();
     auto t1 = t0;
@@ -251,7 +251,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
         batch_size &= 0x7ffff000;
 
-        silk.run_main_kernel(problems, 9999, batch_size, fptr);
+        silk.run_main_kernel(problems, min_report_period, batch_size, fptr);
 
         t2 = std::chrono::high_resolution_clock::now();
 
@@ -328,7 +328,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
             last_solution_count = next_solution_count;
 
             cudaMemcpy(silk.host_srb, silk.srb + 256 * starting_idx, 4096 * solcount, cudaMemcpyDeviceToHost);
-            cudaMemcpy(silk.host_smd, silk.smd + 4 * starting_idx, 4 * solcount, cudaMemcpyDeviceToHost);
+            cudaMemcpy(silk.host_smd, silk.smd + starting_idx, 4 * solcount, cudaMemcpyDeviceToHost);
 
             for (uint64_t i = 0; i < solcount; i++) {
                 SolutionMessage sm;
@@ -346,7 +346,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
     }
 }
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads) {
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period) {
 
     // ***** LOAD PROBLEM *****
 
@@ -428,7 +428,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     FILE* fptr = nullptr;
     // fptr = fopen("dataset.bin", "w");
 
-    run_main_loop(silk, &(ph.perturbation[0]), &solution_queue, &print_queue, fptr);
+    run_main_loop(silk, &(ph.perturbation[0]), &solution_queue, &print_queue, fptr, min_report_period);
 
     if (fptr != nullptr) { fclose(fptr); }
 
