@@ -19,6 +19,11 @@
 #define METRIC_EXPLOIT    14
 #define METRIC_NNUE       15
 
+// pseudometrics:
+#define METRIC_PRB_SIZE   16
+#define METRIC_BATCH_SIZE 17
+
+
 namespace kc {
 
 template<bool CollectMetrics>

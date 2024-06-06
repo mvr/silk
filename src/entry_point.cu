@@ -1,29 +1,6 @@
 #include "cqueue.hpp"
-#include <stdio.h>
-#include <chrono>
-#include <cstdarg>
 #include <thread>
 
-std::string format_string(const char* format, ...) {
-    // Start with variadic arguments
-    va_list args;
-    va_start(args, format);
-
-    // Determine the size needed to hold the formatted string
-    int size = vsnprintf(nullptr, 0, format, args);
-    va_end(args);
-
-    // Create a buffer of the required size
-    std::vector<char> buffer(size + 1); // +1 for null terminator
-
-    // Print to the buffer
-    va_start(args, format);
-    vsnprintf(buffer.data(), buffer.size(), format, args);
-    va_end(args);
-
-    // Create a std::string from the buffer
-    return std::string(buffer.data());
-}
 
 /**
  * Rather trivial kernel that produces training data from the
@@ -227,18 +204,9 @@ struct SilkGPU {
     }
 };
 
-void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* solution_queue, PrintQueue* print_queue, FILE* fptr, int min_report_period) {
-
-    auto t0 = std::chrono::high_resolution_clock::now();
-    auto t1 = t0;
-    auto t2 = t0;
-
-    uint64_t last_problems = silk.host_counters[COUNTER_READING_HEAD];
+void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, FILE* fptr, int min_report_period) {
 
     int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
-
-    uint64_t next_elapsed_secs = 1;
-
     uint64_t last_solution_count = 0;
 
     while (open_problems) {
@@ -253,68 +221,16 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
 
         silk.run_main_kernel(problems, min_report_period, batch_size, fptr);
 
-        t2 = std::chrono::high_resolution_clock::now();
-
-        auto total_usecs = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t0).count();
         open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
-        uint64_t elapsed_secs = total_usecs / 1000000;
-
-        if ((elapsed_secs == 0) || (open_problems == 0) || (elapsed_secs >= next_elapsed_secs)) {
-
-            auto usecs = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-            double total_mprobs_per_sec    = ((double) silk.host_counters[COUNTER_READING_HEAD]) / ((double) total_usecs);
-            double current_mprobs_per_sec  = ((double) (silk.host_counters[COUNTER_READING_HEAD] - last_problems)) / ((double) usecs);
-
-            t1 = t2;
-            last_problems = silk.host_counters[COUNTER_READING_HEAD];
-
-            char time_specifier;
-            uint64_t denom;
-            uint64_t elapsed_increment;
-
-            if (elapsed_secs >= 1209600) { // 336 hours --> 14 days
-                time_specifier = 'd';
-                denom = 86400;
-                elapsed_increment = 86400;
-            } else if (elapsed_secs >= 28800) { // 480 minutes --> 8 hours
-                time_specifier = 'h';
-                denom = 3600;
-                elapsed_increment = (elapsed_secs >= 172800) ? 14400 : 3600;
-            } else if (elapsed_secs >= 600) { // 600 seconds --> 10 minutes
-                time_specifier = 'm';
-                denom = 60;
-                elapsed_increment = (elapsed_secs >= 7200) ? 900 : ((elapsed_secs >= 1800) ? 300 : 60);
-            } else {
-                time_specifier = 's';
-                denom = 1;
-                elapsed_increment = (elapsed_secs >= 60) ? 30 : ((elapsed_secs >= 10) ? 5 : 1);
-            }
-
-            PrintMessage pm; pm.message_type = MESSAGE_STATUS_STRING;
-
-            if ((elapsed_secs == 0) || (open_problems == 0)) {
-                double elapsed_time = ((double) total_usecs) / (1.0e6 * ((double) denom));
-                pm.contents += format_string("|%6.2f %c |", elapsed_time, time_specifier);
-            } else {
-                next_elapsed_secs += elapsed_increment;
-                unsigned long long elapsed_time = elapsed_secs / denom;
-                pm.contents += format_string("| %4d %c  |", elapsed_time, time_specifier);
-            }
-
-            pm.contents += format_string("%14llu | %8llu (%5.2f%%) | %7llu | %7.3f | %7.3f | %7.3f | %7llu | %7llu |",
-                ((unsigned long long) last_problems),
-                ((unsigned long long) open_problems),
-                (100.0 * open_problems / silk.prb_size),
-                ((unsigned long long) problems),
-                ((double) (silk.host_counters[METRIC_ROLLOUT])) / last_problems,
-                current_mprobs_per_sec,
-                total_mprobs_per_sec,
-                ((unsigned long long) (silk.host_counters[COUNTER_SOLUTION_HEAD] - silk.host_counters[METRIC_FIZZLE])),
-                ((unsigned long long) silk.host_counters[METRIC_FIZZLE])
-            );
-
-            print_queue->enqueue(pm);
+        {
+            // report to status queue:
+            SolutionMessage sm; sm.message_type = MESSAGE_STATUS;
+            sm.return_code = 0; // TODO put device ID here
+            for (int i = 0; i < 64; i++) { sm.metrics[i] = silk.host_counters[i]; }
+            sm.metrics[METRIC_PRB_SIZE] = silk.prb_size;
+            sm.metrics[METRIC_BATCH_SIZE] = problems;
+            status_queue->enqueue(sm);
         }
 
         while (silk.host_counters[COUNTER_SOLUTION_HEAD] > last_solution_count) {
@@ -332,7 +248,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
 
             for (uint64_t i = 0; i < solcount; i++) {
                 SolutionMessage sm;
-                sm.message_type = MESSAGE_SOLUTION_STRING;
+                sm.message_type = MESSAGE_SOLUTION;
                 sm.return_code = silk.host_smd[i];
                 for (uint64_t j = 0; j < 1024; j++) {
                     sm.solution[j] = silk.host_srb[1024 * i + j];
@@ -340,9 +256,16 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
                 for (uint64_t j = 0; j < 64; j++) {
                     sm.perturbation[j] = perturbation[j];
                 }
-                solution_queue->enqueue(sm);
+                status_queue->enqueue(sm);
             }
         }
+    }
+
+    {
+        // signal to the status queue that we've finished:
+        SolutionMessage sm;
+        sm.message_type = MESSAGE_KILL_THREAD;
+        status_queue->enqueue(sm);
     }
 }
 
@@ -415,11 +338,15 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     silk.inject_problem(problem, stator);
 
+    // ***** ESTABLISH COMMUNICATIONS *****
+
+    SolutionQueue status_queue;
     SolutionQueue solution_queue;
     PrintQueue print_queue;
 
-    std::thread print_thread(print_thread_loop, &print_queue);
+    std::thread status_thread(status_thread_loop, 1, num_cadical_threads, &status_queue, &solution_queue, &print_queue);
     std::vector<std::thread> cadical_threads;
+    std::thread print_thread(print_thread_loop, num_cadical_threads + 1, &print_queue);
 
     for (int i = 0; i < num_cadical_threads; i++) {
         cadical_threads.emplace_back(solution_thread_loop, &solution_queue, &print_queue);
@@ -428,28 +355,15 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     FILE* fptr = nullptr;
     // fptr = fopen("dataset.bin", "w");
 
-    run_main_loop(silk, &(ph.perturbation[0]), &solution_queue, &print_queue, fptr, min_report_period);
+    run_main_loop(silk, &(ph.perturbation[0]), &status_queue, fptr, min_report_period);
 
     if (fptr != nullptr) { fclose(fptr); }
 
     // ***** TEAR DOWN THREADS *****
 
-    for (int i = 0; i < num_cadical_threads; i++) {
-        SolutionMessage sm;
-        sm.message_type = MESSAGE_KILL_THREAD;
-        solution_queue.enqueue(sm);
-    }
-
-    for (int i = 0; i < num_cadical_threads; i++) {
-        cadical_threads[i].join();
-    }
-
-    {
-        PrintMessage pm;
-        pm.message_type = MESSAGE_KILL_THREAD;
-        print_queue.enqueue(pm);
-        print_thread.join();
-    }
+    status_thread.join();
+    for (int i = 0; i < num_cadical_threads; i++) { cadical_threads[i].join(); }
+    print_thread.join();
 
     return 0;
 }
