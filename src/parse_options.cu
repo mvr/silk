@@ -26,6 +26,7 @@ int main(int argc, char* argv[]) {
         // optional arguments
         ("cadicals", "number of CaDiCaL threads to stabilise results", cxxopts::value<int>()->default_value("8"))
         ("p,period", "minimum period of oscillators to report", cxxopts::value<int>()->default_value("999999999"))
+        ("d,dataset", "filename of dataset to output", cxxopts::value<std::string>()->default_value(""))
     ;
 
     options.parse_positional({"input_filename", "max_active_width", "max_active_height", "max_active_cells"});
@@ -42,6 +43,7 @@ int main(int argc, char* argv[]) {
     // extract optional arguments
     int num_cadical_threads = result["cadicals"].as<int>();
     int min_report_period = result["period"].as<int>();
+    std::string dataset_filename = result["dataset"].as<std::string>();
 
     // run program
     int return_code = silk_main(
@@ -51,7 +53,8 @@ int main(int argc, char* argv[]) {
         input_filename,
         nnue_filename,
         num_cadical_threads,
-        min_report_period
+        min_report_period,
+        dataset_filename
     );
 
     return return_code;

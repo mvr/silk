@@ -1,4 +1,5 @@
 #include "cqueue.hpp"
+#include <silk/perm.hpp>
 #include <thread>
 
 
@@ -66,7 +67,7 @@ struct SilkGPU {
     // host-side pointers:
     uint64_t* host_counters;
     uint32_t* host_freenodes;
-    uint8_t* host_dataset;
+    uint64_t* host_dataset;
     uint32_t* host_srb;
     int32_t* host_smd;
 
@@ -85,10 +86,12 @@ struct SilkGPU {
     uint64_t drb_hwm;
 
     uint64_t perturbation[64];
+    bool has_data;
 
     SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t drb_capacity,
             int active_width, int active_height, int active_pop) {
 
+        has_data = false;
         uint64_t hrb_capacity = prb_capacity >> 4;
 
         cudaMalloc((void**) &ctx, 512);
@@ -161,12 +164,12 @@ struct SilkGPU {
         cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
-    void run_main_kernel(int blocks_to_launch, int min_period, int max_batch_size, FILE* fptr = nullptr) {
+    void run_main_kernel(int blocks_to_launch, int min_period, int max_batch_size, bool make_data, SolutionQueue* status_queue) {
 
         // if we are generating training data, then explore more
         // (75% random + 25% NNUE); otherwise, mostly follow the
         // neural network (5% random + 95% NNUE).
-        double epsilon = (fptr == nullptr) ? 0.05 : 0.75;
+        double epsilon = (make_data) ? 0.75 : 0.05;
 
         // run the kernel:
         launch_main_kernel(blocks_to_launch,
@@ -176,7 +179,7 @@ struct SilkGPU {
             min_period, epsilon
         );
 
-        if (fptr != nullptr) {
+        if (make_data) {
             // extract training data into contiguous gmem:
             makennuedata<<<blocks_to_launch / 2, 32>>>(
                 prb, freenodes, global_counters, dataset, prb_size, drb_size
@@ -185,26 +188,42 @@ struct SilkGPU {
 
         enheap_then_deheap(hrb, global_counters, heap, hrb_size, max_batch_size >> 12, freenodes, prb_size);
 
+        if (has_data) {
+
+            SolutionMessage sm; sm.message_type = MESSAGE_DATA;
+            sm.nnue_data.resize(drb_size * 4);
+
+            // randomly shuffle training data (32-byte vectors):
+            uint64_t random_key = hh::fibmix(host_counters[COUNTER_READING_HEAD]);
+            for (uint32_t i = 0; i < drb_size; i++) {
+                uint32_t k = kc::random_perm(i, drb_size, random_key);
+                for (uint32_t j = 0; j < 4; j++) {
+                    sm.nnue_data[4*i + j] = host_dataset[4*k + j];
+                }
+            }
+
+            status_queue->enqueue(sm);
+            has_data = false;
+        }
+
         cudaMemcpy(host_counters, global_counters, 512, cudaMemcpyDeviceToHost);
 
-        if (fptr != nullptr) {
+        if (make_data) {
             if (host_counters[COUNTER_READING_HEAD] >= drb_hwm + 2 * drb_size) {
-
-                std::cout << "reading head position: " << host_counters[COUNTER_READING_HEAD] << std::endl;
 
                 // we have a fresh batch of training data:
                 cudaMemcpy(host_dataset, dataset, 32 * drb_size, cudaMemcpyDeviceToHost);
 
-                fwrite(host_dataset, 32, drb_size, fptr);
-
                 // update high water mark:
                 drb_hwm = host_counters[COUNTER_READING_HEAD];
+
+                has_data = true;
             }
         }
     }
 };
 
-void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, FILE* fptr, int min_report_period) {
+void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period) {
 
     int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
     uint64_t last_solution_count = 0;
@@ -219,7 +238,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
         batch_size &= 0x7ffff000;
 
-        silk.run_main_kernel(problems, min_report_period, batch_size, fptr);
+        silk.run_main_kernel(problems, min_report_period, batch_size, make_data, status_queue);
 
         open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
@@ -269,7 +288,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
     }
 }
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period) {
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, std::string dataset_filename) {
 
     // ***** LOAD PROBLEM *****
 
@@ -344,7 +363,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     SolutionQueue solution_queue;
     PrintQueue print_queue;
 
-    std::thread status_thread(status_thread_loop, 1, num_cadical_threads, &status_queue, &solution_queue, &print_queue);
+    std::thread status_thread(status_thread_loop, 1, num_cadical_threads, &status_queue, &solution_queue, &print_queue, dataset_filename);
     std::vector<std::thread> cadical_threads;
     std::thread print_thread(print_thread_loop, num_cadical_threads + 1, &print_queue);
 
@@ -352,12 +371,9 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         cadical_threads.emplace_back(solution_thread_loop, &solution_queue, &print_queue);
     }
 
-    FILE* fptr = nullptr;
-    // fptr = fopen("dataset.bin", "w");
+    bool make_data = dataset_filename.size() > 0;
 
-    run_main_loop(silk, &(ph.perturbation[0]), &status_queue, fptr, min_report_period);
-
-    if (fptr != nullptr) { fclose(fptr); }
+    run_main_loop(silk, &(ph.perturbation[0]), &status_queue, make_data, min_report_period);
 
     // ***** TEAR DOWN THREADS *****
 

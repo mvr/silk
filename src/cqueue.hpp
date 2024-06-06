@@ -12,6 +12,7 @@
 #define MESSAGE_SOLUTION 1
 #define MESSAGE_STATUS 2
 #define MESSAGE_INIT 3
+#define MESSAGE_DATA 4
 
 std::string format_string(const char* format, ...) {
     // Start with variadic arguments
@@ -45,12 +46,13 @@ struct SolutionMessage {
     uint32_t solution[1024];
     uint64_t perturbation[64];
     uint64_t metrics[64];
+    std::vector<uint64_t> nnue_data;
 };
 
 typedef moodycamel::BlockingConcurrentQueue<PrintMessage> PrintQueue;
 typedef moodycamel::BlockingConcurrentQueue<SolutionMessage> SolutionQueue;
 
-void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* status_queue, SolutionQueue* solution_queue, PrintQueue* print_queue) {
+void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* status_queue, SolutionQueue* solution_queue, PrintQueue* print_queue, std::string dataset_filename) {
 
     auto t0 = std::chrono::high_resolution_clock::now();
     auto t1 = t0;
@@ -59,17 +61,49 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
     std::vector<uint64_t> totals(64);
     std::vector<uint64_t> individuals(64 * num_gpus);
 
+    std::vector<uint64_t> training_data(33554432); // 256 MiB
+
     int finished_gpus = 0;
     uint64_t next_elapsed_secs = 1;
     uint64_t last_problems = totals[COUNTER_READING_HEAD];
 
+    uint64_t written_samples = 0;
+    uint64_t ingested_samples = 0;
+
     SolutionMessage item;
+
+    FILE* fptr = nullptr;
+    if (dataset_filename.size() > 0) {
+        fptr = fopen(dataset_filename.c_str(), "a");
+    }
+
     while (finished_gpus < num_gpus) {
         status_queue->wait_dequeue(item);
         if (item.message_type == MESSAGE_KILL_THREAD) {
             finished_gpus += 1;
         } else if (item.message_type == MESSAGE_SOLUTION) {
             solution_queue->enqueue(item);
+            continue;
+        } else if (item.message_type == MESSAGE_DATA) {
+            for (uint64_t i = 0; i < item.nnue_data.size(); i += 4) {
+                uint64_t k = (ingested_samples * 3204203) & 8388607;
+                ingested_samples += 1;
+                for (int j = 0; j < 4; j++) {
+                    training_data[4*k+j] = item.nnue_data[i+j];
+                }
+            }
+            if (ingested_samples >= written_samples + 8388608) {
+                written_samples += 8388608;
+                PrintMessage pm; pm.message_type = item.message_type;
+                if (fptr != nullptr) {
+                    fwrite(&(training_data[0]), 32, 8388608, fptr);
+                    double written_gigabytes = 2.9802322387695312e-8 * written_samples;
+                    pm.contents = format_string("# written %.2f GiB of training data", written_gigabytes);
+                } else {
+                    pm.contents = "# error opening file " + dataset_filename;
+                }
+                print_queue->enqueue(pm);
+            }
             continue;
         } else if (item.message_type == MESSAGE_STATUS) {
             int device_id = item.return_code;
@@ -126,7 +160,7 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
 
             uint64_t open_problems = totals[COUNTER_WRITING_HEAD] - totals[COUNTER_READING_HEAD];
 
-            pm.contents += format_string("%14llu | %8llu (%5.2f%%) | %7llu | %7.3f | %7.3f | %7.3f | %7llu | %7llu |",
+            pm.contents += format_string("%14llu |%9llu (%5.2f%%) |%8llu |%8.3f |%8.3f |%8.3f |%8llu |%8llu |",
                 ((unsigned long long) last_problems),
                 ((unsigned long long) open_problems),
                 (100.0 * open_problems / totals[METRIC_PRB_SIZE]),
@@ -141,6 +175,9 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
             print_queue->enqueue(pm);
         }
     }
+
+    // close dataset file:
+    if (fptr != nullptr) { fclose(fptr); }
 
     // tear down solution threads:
     for (int i = 0; i < num_cadical_threads; i++) {
