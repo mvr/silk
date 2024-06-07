@@ -161,7 +161,7 @@ struct SilkGPU {
         cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
-    void run_main_kernel(int blocks_to_launch, int min_period, int max_batch_size, FILE* fptr = nullptr) {
+    void run_main_kernel(int blocks_to_launch, int min_period, int min_stable, int max_batch_size, FILE* fptr = nullptr) {
 
         // if we are generating training data, then explore more
         // (75% random + 25% NNUE); otherwise, mostly follow the
@@ -172,7 +172,7 @@ struct SilkGPU {
         launch_main_kernel(blocks_to_launch,
             ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
             prb_size, srb_size, hrb_size,
-            max_width, max_height, max_pop, rollout_gens,
+            max_width, max_height, max_pop, min_stable, rollout_gens,
             min_period, epsilon
         );
 
@@ -204,7 +204,7 @@ struct SilkGPU {
     }
 };
 
-void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, FILE* fptr, int min_report_period) {
+void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, FILE* fptr, int min_report_period, int min_stable) {
 
     int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
     uint64_t last_solution_count = 0;
@@ -219,7 +219,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
         batch_size &= 0x7ffff000;
 
-        silk.run_main_kernel(problems, min_report_period, batch_size, fptr);
+        silk.run_main_kernel(problems, min_report_period, min_stable, batch_size, fptr);
 
         open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
@@ -269,7 +269,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
     }
 }
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period) {
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int min_stable) {
 
     // ***** LOAD PROBLEM *****
 
@@ -355,7 +355,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     FILE* fptr = nullptr;
     // fptr = fopen("dataset.bin", "w");
 
-    run_main_loop(silk, &(ph.perturbation[0]), &status_queue, fptr, min_report_period);
+    run_main_loop(silk, &(ph.perturbation[0]), &status_queue, fptr, min_report_period, min_stable);
 
     if (fptr != nullptr) { fclose(fptr); }
 

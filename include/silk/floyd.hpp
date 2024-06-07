@@ -15,7 +15,7 @@ namespace kc {
 template<bool CollectMetrics>
 _DI_ int floyd_cycle(
         uint4 &ad0, uint4 &ad1, uint4 &ad2, uint4 &al2, uint4 &al3, uint4 &ad4, uint4 &ad5, uint4 &ad6, uint4 &stator,
-        uint32_t &perturbation, uint32_t &px, uint32_t &py, int max_width, int max_height, int max_pop, uint32_t* metrics = nullptr
+        uint32_t &perturbation, uint32_t &px, uint32_t &py, uint32_t &overall_generation, uint32_t &restored_time, int max_width, int max_height, int max_pop, int min_stable, uint32_t* metrics = nullptr
     ) {
 
     // a half-speed version of perturbation for Floyd's algorithm:
@@ -57,7 +57,21 @@ _DI_ int floyd_cycle(
             // advance by one generation:
             perturbation = not_stable;
             generation += 1;
+            overall_generation += 1;
+            if (hh::ballot_32(perturbation & ad0.x) != 0) {
+                // This also registers that the reaction has started
+                // mvrnote: this doesn't detect smothering interactions!
+                restored_time = 0;
+            } else {
+                if (restored_time != ~0)
+                    restored_time += 1;
+            }
             bump_counter<CollectMetrics>(metrics, METRIC_FLOYD_ITER);
+        }
+
+        if (restored_time != ~0 && restored_time >= min_stable) {
+            generation = 0;
+            break;
         }
 
         {

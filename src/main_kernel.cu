@@ -25,6 +25,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         int max_width,
         int max_height,
         int max_pop,
+        int min_stable,
         int rollout_gens,
 
         // miscellaneous:
@@ -70,6 +71,9 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     uint32_t px = hh::shuffle_32(metadata_y, 2);
     uint32_t py = hh::shuffle_32(metadata_y, 3);
 
+    uint32_t overall_generation = hh::shuffle_32(metadata_y, 6);
+    uint32_t restored_time      = hh::shuffle_32(metadata_y, 7);
+    
     {
         uint32_t best_p = hh::shuffle_32(metadata_y, 30);
         uint32_t contrib = hh::shuffle_32(metadata_y, 31);
@@ -103,7 +107,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     int return_code = kc::mainloop(
         ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator,
-        perturbation, px, py, max_width, max_height, max_pop, rollout_gens,
+        perturbation, px, py, overall_generation, restored_time, max_width, max_height, max_pop, min_stable, rollout_gens,
         smem, metrics
     );
 
@@ -212,6 +216,8 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     if (threadIdx.x == 3) { metadata_out = py; }
     if (threadIdx.x == 4) { metadata_out = final_loss_bits; }
     if (threadIdx.x == 5) { metadata_out = total_info; }
+    if (threadIdx.x == 6) { metadata_out = overall_generation; }
+    if (threadIdx.x == 7) { metadata_out = restored_time; }
 
     if (threadIdx.x < 8) {
         // copy the 32-byte metadata sector into the parent problem:
@@ -250,6 +256,7 @@ void launch_main_kernel(
     int max_width,
     int max_height,
     int max_pop,
+    int min_stable,
     int rollout_gens,
 
     // miscellaneous:
@@ -265,7 +272,7 @@ void launch_main_kernel(
     computecellorbackup<<<blocks_to_launch, 32>>>(
         ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
         prb_size, srb_size, hrb_size,
-        max_width, max_height, max_pop, rollout_gens,
+        max_width, max_height, max_pop, min_stable rollout_gens,
         min_period, epsilon_threshold
     );
 }
