@@ -272,7 +272,7 @@ void launch_main_kernel(
     computecellorbackup<<<blocks_to_launch, 32>>>(
         ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
         prb_size, srb_size, hrb_size,
-        max_width, max_height, max_pop, min_stable rollout_gens,
+        max_width, max_height, max_pop, min_stable, rollout_gens,
         min_period, epsilon_threshold
     );
 }
