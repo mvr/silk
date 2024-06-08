@@ -2,10 +2,31 @@ import os
 import torch
 import numpy as np
 import subprocess
+import time
 from math import gcd
+from concurrent.futures import ThreadPoolExecutor
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 build_dir = os.path.join(this_dir, '../build')
+
+def load_superbatch(record_size, records_per_superbatch, f, s, l, i):
+
+    sb_size = record_size * records_per_superbatch
+    superbatch = []
+
+    for j in range(records_per_superbatch):
+        r = i * records_per_superbatch + j
+        loc = (r * s) % l
+        f.seek(loc * 32 * record_size)
+        superbatch.append(f.read(32 * record_size))
+
+    superbatch = b''.join(superbatch)
+    superbatch = np.frombuffer(superbatch, np.uint8)
+    superbatch = superbatch.reshape(sb_size, 32).copy()
+
+    np.random.shuffle(superbatch)
+    return superbatch
+
 
 class SilkNNUE(torch.nn.Module):
 
@@ -80,27 +101,29 @@ class SilkNNUE(torch.nn.Module):
 
         return y_cuda, y_torch
 
-    def train_loop(self, mb_size=4096, init_lr=0.002, n_epochs=2):
+    def train_loop(self, mb_size=8192, record_size=4096, sb_size=1048576, init_lr=0.002, n_epochs=2):
 
         self.cuda()
 
-        dataset_filename = os.path.join(build_dir, '../dataset.bin')
-        with open(dataset_filename, 'rb') as f:
-            dataset = np.frombuffer(f.read(), np.uint8)
-        dataset = dataset.reshape(-1, 32)
-        print(dataset.shape)
+        dataset_filename = os.path.join(build_dir, '../dataset2.bin')
 
-        l = int(dataset.shape[0])
-        s = int(l * (1.25 ** 0.5 - 0.5)) | 1
+        size_in_bytes = os.path.getsize(dataset_filename)
+
+        assert(size_in_bytes % (sb_size * 32) == 0)
+
+        l = size_in_bytes // (record_size * 32)
+        s = int(l * (1.5 - 1.25 ** 0.5)) | 1
         while gcd(l, s) > 1:
             s += 2
 
-        assert(l % mb_size == 0)
+        print("total records = %d, stride = %d" % (l, s))
 
-        print("total samples = %d, stride = %d" % (l, s))
+        records_per_superbatch = sb_size // record_size
+        batches_per_superbatch = sb_size // mb_size
 
         # do two complete epochs over the data:
-        n_batches = (n_epochs * l) // mb_size
+        n_superbatches = (n_epochs * l) // records_per_superbatch
+        n_batches = n_superbatches * batches_per_superbatch
 
         optimizer = torch.optim.Adam(self.parameters(), lr=init_lr, weight_decay=1.0e-5, eps=0.001)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_batches, eta_min=0)
@@ -121,33 +144,50 @@ class SilkNNUE(torch.nn.Module):
 
         stuff = torch.from_numpy(stuff.astype(np.int32)).cuda()
 
-        idxs = np.array([(i * s) % l for i in range(mb_size)], dtype=np.int64)
-        s2 = (mb_size * s) % l
+        with open(dataset_filename, 'rb') as f:
+            with ThreadPoolExecutor(max_workers=1) as executor:
 
-        for i in range(n_batches):
+                superbatch = None
 
-            optimizer.zero_grad()
+                for i in range(n_superbatches + 1):
 
-            batch = dataset[idxs].astype(np.int32) # upcast from uint8 to int32
-            batch = torch.from_numpy(batch).cuda()
+                    future = executor.submit(load_superbatch, record_size, records_per_superbatch, f, s, l, i)
 
-            x = (batch + stuff).reshape(-1, 32)
-            y = torch.matmul(x[:, -3:].to(torch.float32), coeffs)
-            y_pred = self(x)
+                    if i > 0:
 
-            idxs = (idxs + s2) % l
+                        sb_loss = 0.0
+                        sb_denom = 0.0
+                        t_start = time.time()
 
-            loss = torch.square(y_pred - y).mean()
-            denom = torch.square(y - y.mean()).mean()
+                        for j in range(batches_per_superbatch):
 
-            loss.backward()
-            print(('R^2 = %.2f' % (100.0 * (1.0 - (loss / denom).item()))) + '%')
+                            optimizer.zero_grad()
+                            batch = superbatch[mb_size * j : mb_size * (j+1)].astype(np.int32)
+                            batch = torch.from_numpy(batch).cuda()
 
-            optimizer.step()
-            scheduler.step()
+                            x = (batch + stuff).reshape(-1, 32)
+                            y = torch.matmul(x[:, -3:].to(torch.float32), coeffs)
+                            y_pred = self(x)
 
-            # current_lr = scheduler.get_last_lr()[0]
-            # print('Current LR: %.8f' % current_lr)
+                            loss = torch.square(y_pred - y).mean()
+                            denom = torch.square(y - y.mean()).mean()
+
+                            loss.backward()
+
+                            sb_loss += float(loss.item())
+                            sb_denom += float(denom.item())
+
+                            optimizer.step()
+                            scheduler.step()
+
+                        t_end = time.time()
+
+                        current_lr = scheduler.get_last_lr()[0]
+
+                        rsq = 1.0 - sb_loss / sb_denom
+                        print("Superbatch %d/%d : time = %.2f s, LR = %.8f, R^2 = %.2f%%" % (i, n_superbatches, t_end - t_start, current_lr, 100.0 * rsq))
+
+                    superbatch = future.result()
 
         self.cpu()
 
