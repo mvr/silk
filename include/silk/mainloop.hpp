@@ -49,16 +49,14 @@ _DI_ float hard_branch(
 
     bump_counter<true>(metrics, METRIC_HARDBRANCH);
 
-    uint32_t not_stable = perturbation;
+    // unpack unknown state from stable state and perturbation:
     uint32_t forced_dead = al2 & al3;
     uint32_t forced_live = ad0 & ad1 & ad2 & ad4 & ad5 & ad6;
-    uint32_t not_low = (~not_stable) | forced_dead;
-    uint32_t not_high = (~not_stable) | forced_live;
+    uint32_t not_low = (~perturbation) | forced_dead;
+    uint32_t not_high = (~perturbation) | forced_live;
+    uint32_t not_stable = perturbation;
 
-    kc::inplace_advance_unknown<true>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop, smem);
-
-    uint32_t ambiguous = apply_min3(not_low, not_high, not_stable);
-
+    uint32_t ambiguous = get_branching_cells<true>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop, smem);
     uint32_t unknown_if_stable = ambiguous &~ not_stable;
 
     uint32_t p = compute_next_cell(ambiguous, 0);
