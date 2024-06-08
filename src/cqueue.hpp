@@ -232,6 +232,8 @@ void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue
                 ss << "# Found fizzle" << std::endl;
             } else if (item.return_code == 1) {
                 ss << "# Found restabilisation" << std::endl;
+            } else if (item.return_code == 1000000000) {
+                ss << "# Found catalysis" << std::endl;
             } else {
                 ss << "# Found oscillator with period " << item.return_code << std::endl;
             }
