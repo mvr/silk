@@ -7,7 +7,7 @@
  * Rather trivial kernel that produces training data from the
  * output of computecellorbackup().
  */
-__global__ void makennuedata(const uint4* prb, const uint32_t* freenodes, const uint64_t* global_counters, uint8_t* dataset, uint32_t prb_size, uint32_t drb_size) {
+__global__ void makennuedata(const uint4* prb, const uint32_t* freenodes, const uint64_t* global_counters, uint8_t* dataset, float* predictions, uint32_t prb_size, uint32_t drb_size) {
 
     constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
 
@@ -24,20 +24,20 @@ __global__ void makennuedata(const uint4* prb, const uint32_t* freenodes, const 
     __syncthreads();
 
     uint32_t signature = metadata_location[threadIdx.x + 64];
+    float total_loss = 0.0f;
     {
-        float total_loss = 0.0f;
         uint32_t info_0 = metadata[5];
         if (metadata[8]) {
-            uint32_t info_gain = hh::min(metadata[13] - info_0, ((uint32_t) 20));
+            uint32_t info_gain = hh::min(metadata[13] - info_0, ((uint32_t) 40));
             float sub_loss = __int_as_float(metadata[12]);
             sub_loss = hh::max(0.0f, hh::min(sub_loss, 1.0f));
-            total_loss += 0.375f + 0.125f * sub_loss - 0.015625f * info_gain;
+            total_loss += 0.375f + 0.125f * sub_loss - 0.0078125f * info_gain;
         }
         if (metadata[16]) {
-            uint32_t info_gain = hh::min(metadata[21] - info_0, ((uint32_t) 20));
+            uint32_t info_gain = hh::min(metadata[21] - info_0, ((uint32_t) 40));
             float sub_loss = __int_as_float(metadata[20]);
             sub_loss = hh::max(0.0f, hh::min(sub_loss, 1.0f));
-            total_loss += 0.375f + 0.125f * sub_loss - 0.015625f * info_gain;
+            total_loss += 0.375f + 0.125f * sub_loss - 0.0078125f * info_gain;
         }
         int32_t loss_bits = ((int32_t) (total_loss * 16777216.0f));
         loss_bits = hh::max(((int32_t) 0), hh::min(loss_bits, ((int32_t) 0xffffff)));
@@ -46,8 +46,11 @@ __global__ void makennuedata(const uint4* prb, const uint32_t* freenodes, const 
         }
     }
 
+    if (threadIdx.x == 0) { total_loss = __int_as_float(metadata[4]); }
+
     __syncthreads();
     dataset[pair_idx * 32 + threadIdx.x] = ((uint8_t) signature);
+    if (threadIdx.x < 2) { predictions[pair_idx * 2 + threadIdx.x] = total_loss; }
 }
 
 struct SilkGPU {
@@ -60,6 +63,7 @@ struct SilkGPU {
     uint64_t* global_counters;
     float4* nnue;
     uint8_t* dataset;
+    float* predictions;
     uint32_t* freenodes;
     uint64_t* hrb;
     uint4* heap;
@@ -68,6 +72,7 @@ struct SilkGPU {
     uint64_t* host_counters;
     uint32_t* host_freenodes;
     uint64_t* host_dataset;
+    float* host_predictions;
     uint32_t* host_srb;
     int32_t* host_smd;
 
@@ -97,6 +102,7 @@ struct SilkGPU {
         cudaMalloc((void**) &ctx, 512);
         cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
         cudaMalloc((void**) &dataset, 32 * drb_capacity);
+        cudaMalloc((void**) &predictions, 8 * drb_capacity);
         cudaMalloc((void**) &srb, 4096 * srb_capacity);
         cudaMalloc((void**) &smd, 4 * srb_capacity);
         cudaMalloc((void**) &global_counters, 512);
@@ -105,6 +111,7 @@ struct SilkGPU {
         cudaMalloc((void**) &freenodes, 2 * prb_capacity);
         cudaMallocHost((void**) &host_freenodes, 2 * prb_capacity);
         cudaMallocHost((void**) &host_dataset, 32 * drb_capacity);
+        cudaMallocHost((void**) &host_predictions, 8 * drb_capacity);
         cudaMallocHost((void**) &host_srb, 4096 * srb_capacity);
         cudaMallocHost((void**) &host_smd, 4 * srb_capacity);
 
@@ -141,11 +148,13 @@ struct SilkGPU {
         cudaFree(global_counters);
         cudaFree(nnue);
         cudaFree(dataset);
+        cudaFree(predictions);
         cudaFree(freenodes);
         cudaFree(heap);
         cudaFree(hrb);
         cudaFreeHost(host_counters);
         cudaFreeHost(host_dataset);
+        cudaFreeHost(host_predictions);
         cudaFreeHost(host_freenodes);
         cudaFreeHost(host_srb);
         cudaFreeHost(host_smd);
@@ -182,7 +191,7 @@ struct SilkGPU {
         if (make_data) {
             // extract training data into contiguous gmem:
             makennuedata<<<blocks_to_launch / 2, 32>>>(
-                prb, freenodes, global_counters, dataset, prb_size, drb_size
+                prb, freenodes, global_counters, dataset, predictions, prb_size, drb_size
             );
         }
 
@@ -193,6 +202,9 @@ struct SilkGPU {
             SolutionMessage sm; sm.message_type = MESSAGE_DATA;
             sm.nnue_data.resize(drb_size * 4);
 
+            float target_mean = 0.0f;
+            float pred_mean = 0.0f;
+
             // randomly shuffle training data (32-byte vectors):
             uint64_t random_key = hh::fibmix(host_counters[COUNTER_READING_HEAD]);
             for (uint32_t i = 0; i < drb_size; i++) {
@@ -200,7 +212,30 @@ struct SilkGPU {
                 for (uint32_t j = 0; j < 4; j++) {
                     sm.nnue_data[4*i + j] = host_dataset[4*k + j];
                 }
+                target_mean += host_predictions[2*i+1];
+                pred_mean += host_predictions[2*i];
             }
+
+            target_mean /= ((float) drb_size);
+            pred_mean /= ((float) drb_size);
+
+            float variance = 0.0f;
+            float variance_unexplained = 0.0f;
+
+            for (uint32_t i = 0; i < drb_size; i++) {
+                float target_demeaned = host_predictions[2*i+1] - target_mean;
+                float residual = host_predictions[2*i+1] - host_predictions[2*i];
+                variance += target_demeaned * target_demeaned;
+                variance_unexplained += residual * residual;
+            }
+
+            variance /= ((float) drb_size);
+            variance_unexplained /= ((float) drb_size);
+
+            sm.floats[0] = target_mean;
+            sm.floats[1] = pred_mean;
+            sm.floats[2] = variance;
+            sm.floats[3] = variance_unexplained;
 
             status_queue->enqueue(sm);
             has_data = false;
@@ -213,6 +248,7 @@ struct SilkGPU {
 
                 // we have a fresh batch of training data:
                 cudaMemcpy(host_dataset, dataset, 32 * drb_size, cudaMemcpyDeviceToHost);
+                cudaMemcpy(host_predictions, predictions, 8 * drb_size, cudaMemcpyDeviceToHost);
 
                 // update high water mark:
                 drb_hwm = host_counters[COUNTER_READING_HEAD];

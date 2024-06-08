@@ -46,6 +46,7 @@ struct SolutionMessage {
     uint32_t solution[1024];
     uint64_t perturbation[64];
     uint64_t metrics[64];
+    float floats[4];
     std::vector<uint64_t> nnue_data;
 };
 
@@ -85,6 +86,12 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
             solution_queue->enqueue(item);
             continue;
         } else if (item.message_type == MESSAGE_DATA) {
+            {
+                PrintMessage pm; pm.message_type = item.message_type;
+                pm.contents = format_string("# target mean = %.4f, pred mean = %.4f, R^2 = %5.2f%%", item.floats[0], item.floats[1], 100.f * (1.0f - item.floats[3] / item.floats[2]));
+                print_queue->enqueue(pm);
+            }
+
             for (uint64_t i = 0; i < item.nnue_data.size(); i += 4) {
                 uint64_t k = (ingested_samples * 3204203) & 8388607;
                 ingested_samples += 1;
