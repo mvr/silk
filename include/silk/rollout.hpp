@@ -54,11 +54,16 @@ _DI_ bool branched_rollout(
 
     bump_counter<CollectMetrics>(metrics, METRIC_BRANCHING);
 
-    // obtain the 9-cell ZOI of perturbation:
-    uint32_t mask = perturbation;
-    // mask = expand_plane<true, true>(mask);
-    mask = expand_plane<true, false>(mask);
-    mask = expand_plane<false, true>(mask);
+    // unpack unknown state from stable state and perturbation:
+    uint32_t forced_dead = al2 & al3;
+    uint32_t forced_live = ad0 & ad1 & ad2 & ad4 & ad5 & ad6;
+    uint32_t not_low = (~perturbation) | forced_dead;
+    uint32_t not_high = (~perturbation) | forced_live;
+    uint32_t not_stable = perturbation;
+
+    kc::inplace_advance_unknown<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop);
+
+    uint32_t mask = apply_min3(not_low, not_high, not_stable);
 
     return apply_branched<false>([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
         return run_rollout<CollectMetrics>(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6, perturbation, stator, max_width, max_height, max_pop, gens, metrics);
