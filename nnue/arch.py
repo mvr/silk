@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import numpy as np
 import subprocess
@@ -101,11 +102,9 @@ class SilkNNUE(torch.nn.Module):
 
         return y_cuda, y_torch
 
-    def train_loop(self, mb_size=8192, record_size=4096, sb_size=1048576, init_lr=0.002, n_epochs=2):
+    def train_loop(self, dataset_filename, mb_size, n_epochs, record_size=8192, sb_size=8388608, init_lr=0.002):
 
         self.cuda()
-
-        dataset_filename = os.path.join(build_dir, '../dataset2.bin')
 
         size_in_bytes = os.path.getsize(dataset_filename)
 
@@ -194,10 +193,16 @@ class SilkNNUE(torch.nn.Module):
 
 if __name__ == '__main__':
 
+    argc = len(sys.argv)
+
+    dataset_filename = sys.argv[1]
+    mb_size = int(sys.argv[2]) if (argc >= 3) else 8192
+    n_epochs = int(sys.argv[3]) if (argc >= 4) else 2
+
     nnue = SilkNNUE()
     nnue.embedding.weight.data.mul_(1.0e-3) # override bad initialisation
 
-    nnue.train_loop()
+    nnue.train_loop(dataset_filename, mb_size, n_epochs)
 
     y_cuda, y_torch = nnue.run_comparison(10000)
     rms_err = np.sqrt(np.square(y_cuda - y_torch).mean() / np.square(y_torch).mean())
