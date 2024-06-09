@@ -147,6 +147,7 @@ class SilkNNUE(torch.nn.Module):
             with ThreadPoolExecutor(max_workers=1) as executor:
 
                 superbatch = None
+                t_start = None
 
                 for i in range(n_superbatches + 1):
 
@@ -156,7 +157,6 @@ class SilkNNUE(torch.nn.Module):
 
                         sb_loss = 0.0
                         sb_denom = 0.0
-                        t_start = time.time()
 
                         for j in range(batches_per_superbatch):
 
@@ -185,6 +185,8 @@ class SilkNNUE(torch.nn.Module):
 
                         rsq = 1.0 - sb_loss / sb_denom
                         print("Superbatch %d/%d : time = %.2f s, LR = %.8f, R^2 = %.2f%%" % (i, n_superbatches, t_end - t_start, current_lr, 100.0 * rsq))
+
+                        t_start = t_end
 
                     superbatch = future.result()
 
