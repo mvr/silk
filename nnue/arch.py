@@ -5,27 +5,29 @@ import numpy as np
 import subprocess
 import time
 from math import gcd
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 build_dir = os.path.join(this_dir, '../build')
 
-def load_superbatch(record_size, records_per_superbatch, f, s, l, i):
+def load_superbatch(record_size, records_per_superbatch, filename, s, l, i):
 
-    sb_size = record_size * records_per_superbatch
-    superbatch = []
+    with open(filename, 'rb') as f:
 
-    for j in range(records_per_superbatch):
-        r = i * records_per_superbatch + j
-        loc = (r * s) % l
-        f.seek(loc * 32 * record_size)
-        superbatch.append(f.read(32 * record_size))
+        sb_size = record_size * records_per_superbatch
+        superbatch = []
+
+        for j in range(records_per_superbatch):
+            r = i * records_per_superbatch + j
+            loc = (r * s) % l
+            f.seek(loc * 32 * record_size)
+            superbatch.append(f.read(32 * record_size))
 
     superbatch = b''.join(superbatch)
     superbatch = np.frombuffer(superbatch, np.uint8)
     superbatch = superbatch.reshape(sb_size, 32).copy()
-
     np.random.shuffle(superbatch)
+
     return superbatch
 
 
@@ -102,7 +104,7 @@ class SilkNNUE(torch.nn.Module):
 
         return y_cuda, y_torch
 
-    def train_loop(self, dataset_filename, mb_size, n_epochs, record_size=8192, sb_size=8388608, init_lr=0.002):
+    def train_loop(self, dataset_filename, mb_size, n_epochs, record_size=8192, sb_size=8388608, init_lr=0.002, cpu_threads=8):
 
         self.cuda()
 
@@ -143,25 +145,26 @@ class SilkNNUE(torch.nn.Module):
 
         stuff = torch.from_numpy(stuff.astype(np.int32)).cuda()
 
-        with open(dataset_filename, 'rb') as f:
-            with ThreadPoolExecutor(max_workers=1) as executor:
+        with ProcessPoolExecutor(max_workers=cpu_threads) as executor:
 
-                superbatch = None
-                t_start = time.time()
+            superbatch = None
+            t_start = time.time()
 
-                for i in range(n_superbatches + 1):
+            for i in range(n_superbatches + 1):
 
-                    future = executor.submit(load_superbatch, record_size, records_per_superbatch, f, s, l, i)
+                futures = [executor.submit(load_superbatch, record_size, records_per_superbatch // cpu_threads, dataset_filename, s, l, cpu_threads*i + j) for j in range(cpu_threads)]
 
-                    if i > 0:
+                if i > 0:
 
-                        sb_loss = 0.0
-                        sb_denom = 0.0
+                    sb_loss = 0.0
+                    sb_denom = 0.0
 
-                        for j in range(batches_per_superbatch):
+                    for j in range(cpu_threads):
+
+                        for k in range(batches_per_superbatch // cpu_threads):
 
                             optimizer.zero_grad()
-                            batch = superbatch[mb_size * j : mb_size * (j+1)].astype(np.int32)
+                            batch = superbatch[j][mb_size * k : mb_size * (k+1)].astype(np.int32)
                             batch = torch.from_numpy(batch).cuda()
 
                             x = (batch + stuff).reshape(-1, 32)
@@ -179,16 +182,16 @@ class SilkNNUE(torch.nn.Module):
                             optimizer.step()
                             scheduler.step()
 
-                        t_end = time.time()
+                    t_end = time.time()
 
-                        current_lr = scheduler.get_last_lr()[0]
+                    current_lr = scheduler.get_last_lr()[0]
 
-                        rsq = 1.0 - sb_loss / sb_denom
-                        print("Superbatch %d/%d : time = %.2f s, LR = %.8f, R^2 = %.2f%%" % (i, n_superbatches, t_end - t_start, current_lr, 100.0 * rsq))
+                    rsq = 1.0 - sb_loss / sb_denom
+                    print("Superbatch %d/%d : time = %.2f s, LR = %.8f, R^2 = %.2f%%" % (i, n_superbatches, t_end - t_start, current_lr, 100.0 * rsq))
 
-                        t_start = t_end
+                    t_start = t_end
 
-                    superbatch = future.result()
+                superbatch = [x.result() for x in futures]
 
         self.cpu()
 
