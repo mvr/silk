@@ -147,7 +147,7 @@ class SilkNNUE(torch.nn.Module):
             with ThreadPoolExecutor(max_workers=1) as executor:
 
                 superbatch = None
-                t_start = None
+                t_start = time.time()
 
                 for i in range(n_superbatches + 1):
 
