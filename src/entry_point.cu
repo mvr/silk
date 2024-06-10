@@ -98,11 +98,10 @@ struct SilkGPU {
 
         has_data = false;
         uint64_t hrb_capacity = prb_capacity >> 4;
+        if (hrb_capacity < 8192) { hrb_capacity = 8192; }
 
         cudaMalloc((void**) &ctx, 512);
         cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
-        cudaMalloc((void**) &dataset, 32 * drb_capacity);
-        cudaMalloc((void**) &predictions, 8 * drb_capacity);
         cudaMalloc((void**) &srb, 4096 * srb_capacity);
         cudaMalloc((void**) &smd, 4 * srb_capacity);
         cudaMalloc((void**) &global_counters, 512);
@@ -110,10 +109,15 @@ struct SilkGPU {
 
         cudaMalloc((void**) &freenodes, 2 * prb_capacity);
         cudaMallocHost((void**) &host_freenodes, 2 * prb_capacity);
-        cudaMallocHost((void**) &host_dataset, 32 * drb_capacity);
-        cudaMallocHost((void**) &host_predictions, 8 * drb_capacity);
         cudaMallocHost((void**) &host_srb, 4096 * srb_capacity);
         cudaMallocHost((void**) &host_smd, 4 * srb_capacity);
+
+        if (drb_capacity > 0) {
+            cudaMalloc((void**) &dataset, 32 * drb_capacity);
+            cudaMalloc((void**) &predictions, 8 * drb_capacity);
+            cudaMallocHost((void**) &host_dataset, 32 * drb_capacity);
+            cudaMallocHost((void**) &host_predictions, 8 * drb_capacity);
+        }
 
         cudaMalloc((void**) &hrb, 8 * hrb_capacity);
         cudaMalloc((void**) &heap, 8 * prb_capacity);
@@ -147,17 +151,20 @@ struct SilkGPU {
         cudaFree(smd);
         cudaFree(global_counters);
         cudaFree(nnue);
-        cudaFree(dataset);
-        cudaFree(predictions);
         cudaFree(freenodes);
         cudaFree(heap);
         cudaFree(hrb);
         cudaFreeHost(host_counters);
-        cudaFreeHost(host_dataset);
-        cudaFreeHost(host_predictions);
         cudaFreeHost(host_freenodes);
         cudaFreeHost(host_srb);
         cudaFreeHost(host_smd);
+
+        if (drb_size > 0) {
+            cudaFree(dataset);
+            cudaFree(predictions);
+            cudaFreeHost(host_dataset);
+            cudaFreeHost(host_predictions);
+        }
     }
 
     void inject_problem(std::vector<uint32_t> problem, std::vector<uint32_t> stator) {
@@ -188,6 +195,8 @@ struct SilkGPU {
             min_period, epsilon
         );
 
+        hh::reportCudaError(cudaGetLastError());
+
         if (make_data) {
             // extract training data into contiguous gmem:
             makennuedata<<<blocks_to_launch / 2, 32>>>(
@@ -196,6 +205,8 @@ struct SilkGPU {
         }
 
         enheap_then_deheap(hrb, global_counters, heap, hrb_size, max_batch_size >> 12, freenodes, prb_size);
+
+        hh::reportCudaError(cudaGetLastError());
 
         if (has_data) {
 
@@ -360,9 +371,11 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         return 1;
     }
 
+    bool make_data = dataset_filename.size() > 0;
+
     // these probably don't need changing:
     size_t srb_capacity = 16384;
-    size_t drb_capacity = 1048576;
+    size_t drb_capacity = make_data ? 1048576 : 0;
     free_mem -= (srb_capacity + 4096) * 4096;
     free_mem -= drb_capacity * 32;
 
@@ -406,8 +419,6 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     for (int i = 0; i < num_cadical_threads; i++) {
         cadical_threads.emplace_back(solution_thread_loop, &solution_queue, &print_queue);
     }
-
-    bool make_data = dataset_filename.size() > 0;
 
     run_main_loop(silk, &(ph.perturbation[0]), &status_queue, make_data, min_report_period, min_stable);
 

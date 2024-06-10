@@ -67,15 +67,12 @@ __global__ void __launch_bounds__(1024, 1) deheap(const uint64_t* hrb, uint64_t*
     __syncthreads();
 
     if (things_to_remove < max_elements) {
-        hh::vec<uint64_t, 2> x;
         int offset = (hrb_start + threadIdx.x) & (hrb_size - 1);
-        x[0] = hrb[offset];
-        x[1] = hrb[offset + 1024];
         if (threadIdx.x < extra_values) {
-            free_nodes[(middle_head + threadIdx.x) & prb_mask] = x[0];
+            free_nodes[(middle_head + threadIdx.x) & prb_mask] = hrb[offset];
         }
         if (threadIdx.x + 1024 < extra_values) {
-            free_nodes[(middle_head + threadIdx.x + 1024) & prb_mask] = x[1];
+            free_nodes[(middle_head + threadIdx.x + 1024) & prb_mask] = hrb[offset + 1024];
         }
         middle_head += extra_values;
         global_counters[COUNTER_HRB_READING_HEAD] = 0;
