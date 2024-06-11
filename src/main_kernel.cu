@@ -105,16 +105,34 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     // ********** PERFORM PROPAGATION AND ADVANCING **********
 
-    int return_code = kc::mainloop(
-        ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator,
-        perturbation, px, py, overall_generation, restored_time, max_width, max_height, max_pop, min_stable, rollout_gens,
-        smem, metrics
-    );
+    kc::bump_counter<true>(metrics, METRIC_KERNEL);
+
+    int return_code = -3;
+    bool has_advanced = false;
+
+    // main loop:
+    while (return_code == -3) {
+        // apply soft-branching and propagation:
+        bool contradiction = kc::branched_rollout<true>(
+            smem, ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, perturbation, stator.x,
+            max_width, max_height, max_pop, rollout_gens, metrics
+        );
+        if (contradiction) { return_code = -1; break; }
+
+        // advance and perform cycle detection:
+        return_code = kc::floyd_cycle<true>(
+            ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, perturbation, px, py,
+            overall_generation, restored_time, max_width, max_height, max_pop, min_stable, metrics
+        );
+
+        if (return_code == -3) { has_advanced = true; }
+    }
 
     if (return_code == -1) { kc::bump_counter<true>(metrics, METRIC_DEADEND); }
     if (return_code ==  0) { kc::bump_counter<true>(metrics, METRIC_FIZZLE); }
     if (return_code ==  1) { kc::bump_counter<true>(metrics, METRIC_RESTAB); }
-    if (return_code >=  2) { kc::bump_counter<true>(metrics, METRIC_OSCILLATOR); }
+    if (return_code ==  1000000000) { kc::bump_counter<true>(metrics, METRIC_CATALYSIS); }
+    else if (return_code >=  2) { kc::bump_counter<true>(metrics, METRIC_OSCILLATOR); }
 
     // ********** HANDLE POTENTIAL SOLUTIONS **********
 
@@ -218,6 +236,8 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     if (threadIdx.x == 5) { metadata_out = total_info; }
     if (threadIdx.x == 6) { metadata_out = overall_generation; }
     if (threadIdx.x == 7) { metadata_out = restored_time; }
+
+    __syncthreads();
 
     if (threadIdx.x < 8) {
         // copy the 32-byte metadata sector into the parent problem:

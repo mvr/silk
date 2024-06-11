@@ -166,16 +166,18 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
             }
 
             uint64_t open_problems = totals[COUNTER_WRITING_HEAD] - totals[COUNTER_READING_HEAD];
+            uint64_t high_period = totals[COUNTER_SOLUTION_HEAD] - totals[METRIC_FIZZLE] - totals[METRIC_CATALYSIS];
 
-            pm.contents += format_string("%14llu |%9llu (%5.2f%%) |%8llu |%8.3f |%8.3f |%8.3f |%8llu |%8llu |",
-                ((unsigned long long) last_problems),
+            pm.contents += format_string("%14llu |%9llu (%5.2f%%) |%8llu |%8.3f |%8.3f |%8.3f |%8llu |%8llu |%8llu |",
+                ((unsigned long long) totals[METRIC_KERNEL]),
                 ((unsigned long long) open_problems),
                 (100.0 * open_problems / totals[METRIC_PRB_SIZE]),
                 ((unsigned long long) totals[METRIC_BATCH_SIZE]),
                 ((double) (totals[METRIC_ROLLOUT])) / last_problems,
                 current_mprobs_per_sec,
                 total_mprobs_per_sec,
-                ((unsigned long long) (totals[COUNTER_SOLUTION_HEAD] - totals[METRIC_FIZZLE])),
+                ((unsigned long long) totals[METRIC_CATALYSIS]),
+                ((unsigned long long) high_period),
                 ((unsigned long long) totals[METRIC_FIZZLE])
             );
 
@@ -191,6 +193,54 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
         SolutionMessage sm;
         sm.message_type = MESSAGE_KILL_THREAD;
         solution_queue->enqueue(sm);
+    }
+
+    // produce aelluvial diagram:
+    {
+        std::string aelluvial =
+        "   "    "%12llu               \033[32;1m%16llu\033[0m         " "%16llu       "        "%16llu\n"
+        "    original problems       *--> catalyst recovered    *--> restabilised      *---> low-period\n"
+        "             |             /                          /                      / \n"
+        "             |            /   "        "%16llu       / "        "%16llu     / \033[32;1m%16llu\033[0m \n"
+        "             |           *-----> became periodic ---*-----> oscillatory ---*------> high-period\n"
+        "             v           |                           L                   \n"
+        "   "        "%16llu      |    "        "%16llu        L\033[32;1m%16llu\033[0m \n"
+        "   problems processed ---*------> contradictory        *--> fizzled out  \n"
+        "             ^            L                                              \n"
+        "             |             L  "        "%16llu         "        "%16llu  \n"
+        "             |              *---> indeterminate ----*-----> deduplicated \n"
+        "             |                                      | \n"
+        "   "        "%16llu           "        "%16llu      | \n"
+        "       new problems <-------------- bifurcated <----* \n"
+        "             ^                           | \n"
+        "             |                           | \n"
+        "             *---------------------------* \n";
+        for (size_t i = 0; i < aelluvial.size(); i++) {
+            if (aelluvial[i] == 'L') { aelluvial[i] = '\\'; }
+        }
+        uint64_t original = totals[METRIC_KERNEL] - 2 * totals[METRIC_HARDBRANCH];
+        uint64_t periodic = totals[METRIC_OSCILLATOR] + totals[METRIC_RESTAB] + totals[METRIC_FIZZLE];
+        uint64_t indeterminate = totals[METRIC_KERNEL] - (totals[METRIC_DEADEND] + periodic + totals[METRIC_CATALYSIS]);
+        uint64_t high_period = totals[COUNTER_SOLUTION_HEAD] - totals[METRIC_FIZZLE] - totals[METRIC_CATALYSIS];
+        uint64_t low_period = totals[METRIC_OSCILLATOR] - high_period;
+        PrintMessage pm; pm.contents = format_string(aelluvial.c_str(),
+            (unsigned long long) original,
+            (unsigned long long) totals[METRIC_CATALYSIS],
+            (unsigned long long) totals[METRIC_RESTAB],
+            (unsigned long long) low_period,
+            (unsigned long long) periodic,
+            (unsigned long long) totals[METRIC_OSCILLATOR],
+            (unsigned long long) high_period,
+            (unsigned long long) totals[METRIC_KERNEL],
+            (unsigned long long) totals[METRIC_DEADEND],
+            (unsigned long long) totals[METRIC_FIZZLE],
+            (unsigned long long) indeterminate,
+            (unsigned long long) (indeterminate - totals[METRIC_HARDBRANCH]),
+            (unsigned long long) (2 * totals[METRIC_HARDBRANCH]),
+            (unsigned long long) totals[METRIC_HARDBRANCH]
+        );
+        pm.message_type = MESSAGE_SOLUTION;
+        print_queue->enqueue(pm);
     }
 
     // alert print queue that we've finished:
@@ -283,13 +333,13 @@ void print_thread_loop(int num_writers, PrintQueue* print_queue) {
         }
 
         if ((item.message_type == MESSAGE_STATUS) && (last_message_type != MESSAGE_STATUS)) {
-            std::cout << "+---------+-----------------------------------+---------+---------+-------------------+-------------------+" << std::endl;
-            std::cout << "| elapsed |           problems                | current | rollout | speed (Mprob/sec) |     solutions     |" << std::endl;
-            std::cout << "|  clock  +---------------+-------------------+  batch  |   per   +---------+---------+---------+---------+" << std::endl;
-            std::cout << "|   time  |     solved    |  open (pct full)  |   size  | problem | current | overall | oscill. | fizzles |" << std::endl;
-            std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+" << std::endl;
+            std::cout << "+---------+-----------------------------------+---------+---------+-------------------+-----------------------------+" << std::endl;
+            std::cout << "| elapsed |           problems                | current | rollout | speed (Mprob/sec) |          solutions          |" << std::endl;
+            std::cout << "|  clock  +---------------+-------------------+  batch  |   per   +---------+---------+---------+---------+---------+" << std::endl;
+            std::cout << "|   time  |     solved    |  open (pct full)  |   size  | problem | current | overall | recover | oscill. | fizzles |" << std::endl;
+            std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+---------+" << std::endl;
         } else if ((item.message_type != MESSAGE_STATUS) && (last_message_type == MESSAGE_STATUS)) {
-            std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+" << std::endl;
+            std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+---------+" << std::endl;
             std::cout << std::endl;
         }
 

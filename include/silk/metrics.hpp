@@ -19,9 +19,11 @@
 #define METRIC_EXPLOIT    14
 #define METRIC_NNUE       15
 
+#define METRIC_CATALYSIS  16
+
 // pseudometrics:
-#define METRIC_PRB_SIZE   16
-#define METRIC_BATCH_SIZE 17
+#define METRIC_PRB_SIZE   31
+#define METRIC_BATCH_SIZE 30
 
 
 namespace kc {
