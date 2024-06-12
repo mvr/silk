@@ -38,7 +38,7 @@ make -j 8
 
 cd ..
 
-cp "nnue/nnue_399M.dat" "build/src/silk_nnue.dat"
+cp "nnue/nnue_20928M.dat" "build/src/silk_nnue.dat"
 
 # build/src/silk
 # build/test/gpu/gpu_unit_test
