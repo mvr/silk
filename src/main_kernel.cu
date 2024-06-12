@@ -108,14 +108,14 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     kc::bump_counter<true>(metrics, METRIC_KERNEL);
 
     int return_code = -3;
-    bool has_advanced = false;
+    int max_rounds = 2;
 
     // main loop:
     while (return_code == -3) {
         // apply soft-branching and propagation:
         bool contradiction = kc::branched_rollout<true>(
             smem, ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, perturbation, stator.x,
-            max_width, max_height, max_pop, rollout_gens, metrics
+            max_width, max_height, max_pop, rollout_gens, metrics, max_rounds
         );
         if (contradiction) { return_code = -1; break; }
 
@@ -125,7 +125,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
             overall_generation, restored_time, max_width, max_height, max_pop, min_stable, metrics
         );
 
-        if (return_code == -3) { has_advanced = true; }
+        if (return_code == -3) { max_rounds = 1; }
     }
 
     if (return_code == -1) { kc::bump_counter<true>(metrics, METRIC_DEADEND); }

@@ -6,7 +6,7 @@ namespace kc {
 template<bool CollectMetrics>
 _DI_ bool run_rollout(
     uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
-    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens, uint32_t* metrics = nullptr
+    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens, uint32_t* metrics = nullptr, int max_rounds = 32768
 ) {
 
     bool improved = true;
@@ -17,7 +17,7 @@ _DI_ bool run_rollout(
 
         {
             // apply stable propagation rules:
-            bool contradiction = kc::stableprop<CollectMetrics>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, metrics);
+            bool contradiction = kc::stableprop<CollectMetrics>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, metrics, max_rounds);
             if (contradiction) { return true; }
         }
 
@@ -82,7 +82,7 @@ _DI_ uint32_t get_branching_cells(
 template<bool CollectMetrics>
 _DI_ bool branched_rollout(
     uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
-    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens, uint32_t *metrics = nullptr
+    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens, uint32_t *metrics = nullptr, int max_rounds = 32768
 ) {
 
     bump_counter<CollectMetrics>(metrics, METRIC_BRANCHING);
@@ -104,7 +104,7 @@ _DI_ bool branched_rollout(
         cumulative_mask |= mask;
 
         bool contradiction = apply_branched<false>([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
-            return run_rollout<CollectMetrics>(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6, perturbation, stator, max_width, max_height, max_pop, gens, metrics);
+            return run_rollout<CollectMetrics>(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6, perturbation, stator, max_width, max_height, max_pop, gens, metrics, max_rounds);
         }, mask, smem, ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 
         if (contradiction) { return true; }

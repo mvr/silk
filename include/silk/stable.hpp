@@ -39,7 +39,7 @@ _DI_ uint32_t is_determined(uint32_t ad0, uint32_t ad1, uint32_t ad2, uint32_t a
 }
 
 template<bool CollectMetrics>
-_DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6, uint32_t* metrics = nullptr) {
+_DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6, uint32_t* metrics = nullptr, int max_rounds = 32768) {
 
     bump_counter<CollectMetrics>(metrics, METRIC_STABLEPROP);
 
@@ -51,7 +51,7 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
 
     int no_progress = 0;
 
-    while (no_progress < 2) {
+    for (int i = 0; i < max_rounds; i++) {
 
         bump_counter<CollectMetrics>(metrics, METRIC_DOMINO_RULE);
         if (apply_domino_rule<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6)) {
@@ -74,6 +74,8 @@ _DI_ bool stableprop(uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2,
         } else {
             no_progress += 1;
         }
+
+        if (no_progress >= 2) { break; }
     }
 
     return false;

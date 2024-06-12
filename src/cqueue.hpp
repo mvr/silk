@@ -124,7 +124,7 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
         auto total_usecs = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t0).count();
         uint64_t elapsed_secs = total_usecs / 1000000;
 
-        if ((elapsed_secs == 0) || (finished_gpus == num_gpus) || (elapsed_secs >= next_elapsed_secs)) {
+        if ((finished_gpus == num_gpus) || (elapsed_secs >= next_elapsed_secs)) {
             auto usecs = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
             double total_mprobs_per_sec    = ((double) totals[COUNTER_READING_HEAD]) / ((double) total_usecs);
             double current_mprobs_per_sec  = ((double) (totals[COUNTER_READING_HEAD] - last_problems)) / ((double) usecs);
