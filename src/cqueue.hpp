@@ -147,11 +147,11 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
             } else if (elapsed_secs >= 600) { // 600 seconds --> 10 minutes
                 time_specifier = 'm';
                 denom = 60;
-                elapsed_increment = (elapsed_secs >= 7200) ? 900 : ((elapsed_secs >= 1800) ? 300 : 60);
+                elapsed_increment = (elapsed_secs >= 7200) ? 900 : (elapsed_secs >= 1800) ? 300 : 60;
             } else {
                 time_specifier = 's';
                 denom = 1;
-                elapsed_increment = (elapsed_secs >= 60) ? 30 : ((elapsed_secs >= 10) ? 5 : 1);
+                elapsed_increment = (elapsed_secs >= 120) ? 30 : (elapsed_secs >= 60) ? 10 : (elapsed_secs >= 10) ? 5 : 1;
             }
 
             PrintMessage pm; pm.message_type = MESSAGE_STATUS;
