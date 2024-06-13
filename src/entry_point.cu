@@ -12,7 +12,8 @@ __global__ void makennuedata(const uint4* prb, const uint32_t* freenodes, const 
     constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
 
     // get the location from which to read:
-    uint32_t pair_idx = (global_counters[COUNTER_READING_HEAD] >> 1) + blockIdx.x;
+    uint64_t pair_idx = (global_counters[COUNTER_READING_HEAD] >> 1) + blockIdx.x;
+    if (pair_idx >= (global_counters[COUNTER_MIDDLE_HEAD] >> 1)) { return; }
     uint32_t node_loc = freenodes[pair_idx & ((prb_size >> 1) - 1)];
     pair_idx &= (drb_size - 1);
 
@@ -180,34 +181,46 @@ struct SilkGPU {
         cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
-    void run_main_kernel(int blocks_to_launch, int min_period, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue) {
+    void run_main_kernel(int blocks_to_launch, int min_period, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int batches = 4) {
 
         // if we are generating training data, then explore more
         // (75% random + 25% NNUE); otherwise, mostly follow the
         // neural network (5% random + 95% NNUE).
         double epsilon = (make_data) ? 0.75 : 0.05;
 
-        // run the kernel:
-        launch_main_kernel(blocks_to_launch,
-            ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
-            prb_size, srb_size, hrb_size,
-            max_width, max_height, max_pop, min_stable, rollout_gens,
-            min_period, epsilon
-        );
+        // for batch 0, we know exactly the number of blocks:
+        int batch_size = blocks_to_launch;
 
-        hh::reportCudaError(cudaGetLastError());
+        // Asynchronous loop: we enqueue multiple batches to run on the GPU:
+        for (int bidx = 0; bidx < batches; bidx++) {
 
-        if (make_data) {
-            // extract training data into contiguous gmem:
-            makennuedata<<<blocks_to_launch / 2, 32>>>(
-                prb, freenodes, global_counters, dataset, predictions, prb_size, drb_size
+            // run the kernel:
+            launch_main_kernel(batch_size,
+                ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
+                prb_size, srb_size, hrb_size,
+                max_width, max_height, max_pop, min_stable, rollout_gens,
+                min_period, epsilon
             );
+
+            if (make_data) {
+                // extract training data into contiguous gmem:
+                makennuedata<<<batch_size / 2, 32>>>(
+                    prb, freenodes, global_counters, dataset, predictions, prb_size, drb_size
+                );
+            }
+
+            // select the problems to run next:
+            enheap_then_deheap(hrb, global_counters, heap, hrb_size, max_batch_size >> 12, freenodes, prb_size);
+
+            // for subsequent batches, we do not know on the host side
+            // the exact number of blocks to launch, but we have an upper
+            // bound so we launch this number (the excess blocks will
+            // early-exit):
+            batch_size = max_batch_size;
         }
 
-        enheap_then_deheap(hrb, global_counters, heap, hrb_size, max_batch_size >> 12, freenodes, prb_size);
-
-        hh::reportCudaError(cudaGetLastError());
-
+        // This moderately expensive host-side operation will execute
+        // whilst the kernels are running:
         if (has_data) {
 
             SolutionMessage sm; sm.message_type = MESSAGE_DATA;
@@ -252,6 +265,7 @@ struct SilkGPU {
             has_data = false;
         }
 
+        // this is synchronous, so awaits the completion of the kernels:
         cudaMemcpy(host_counters, global_counters, 512, cudaMemcpyDeviceToHost);
 
         if (make_data) {
@@ -267,6 +281,8 @@ struct SilkGPU {
                 has_data = true;
             }
         }
+
+        hh::reportCudaError(cudaGetLastError());
     }
 };
 

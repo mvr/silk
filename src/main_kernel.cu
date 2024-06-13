@@ -36,7 +36,9 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
 
     // determine which problem to load:
-    uint32_t logical_block_idx = (global_counters[COUNTER_READING_HEAD] + blockIdx.x) & (prb_size - 1);
+    uint64_t logical_block_idx = global_counters[COUNTER_READING_HEAD] + blockIdx.x;
+    if (logical_block_idx >= global_counters[COUNTER_MIDDLE_HEAD]) { return; }
+    logical_block_idx &= (prb_size - 1);
     uint32_t block_parity = logical_block_idx & 1;
     uint4* reading_location = prb + uint4s_per_pp * freenodes[logical_block_idx >> 1];
 
