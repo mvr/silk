@@ -181,7 +181,7 @@ struct SilkGPU {
         cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
-    void run_main_kernel(int blocks_to_launch, int min_period, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int batches = 4) {
+    void run_main_kernel(int blocks_to_launch, int open_problems, int min_period, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int batches = 4) {
 
         // if we are generating training data, then explore more
         // (75% random + 25% NNUE); otherwise, mostly follow the
@@ -190,6 +190,7 @@ struct SilkGPU {
 
         // for batch 0, we know exactly the number of blocks:
         int batch_size = blocks_to_launch;
+        int max_open_problems = open_problems;
 
         // Asynchronous loop: we enqueue multiple batches to run on the GPU:
         for (int bidx = 0; bidx < batches; bidx++) {
@@ -216,7 +217,8 @@ struct SilkGPU {
             // the exact number of blocks to launch, but we have an upper
             // bound so we launch this number (the excess blocks will
             // early-exit):
-            batch_size = max_batch_size;
+            max_open_problems += batch_size;
+            batch_size = hh::min(max_batch_size, max_open_problems);
         }
 
         // This moderately expensive host-side operation will execute
@@ -301,7 +303,7 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
         batch_size &= 0x7ffff000;
 
-        silk.run_main_kernel(problems, min_report_period, min_stable, batch_size, make_data, status_queue);
+        silk.run_main_kernel(problems, open_problems, min_report_period, min_stable, batch_size, make_data, status_queue);
 
         open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 

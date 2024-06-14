@@ -2,18 +2,17 @@
 #include <silk/heap.hpp>
 
 
-__global__ void __launch_bounds__(1024, 1) enheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size) {
+__global__ void __launch_bounds__(1024, 1) heapmanager(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size) {
 
     __shared__ uint64_t smem[2048];
 
     // load from global counters:
-    uint64_t hrb_start = global_counters[COUNTER_HRB_READING_HEAD];
-    uint64_t hrb_end   = global_counters[COUNTER_HRB_WRITING_HEAD];
-    int heap_elements  = global_counters[COUNTER_HEAP_ELEMENTS];
+    uint64_t hrb_start   = global_counters[COUNTER_HRB_READING_HEAD];
+    uint64_t hrb_end     = global_counters[COUNTER_HRB_WRITING_HEAD];
+    uint64_t middle_head = global_counters[COUNTER_MIDDLE_HEAD];
+    int heap_elements    = global_counters[COUNTER_HEAP_ELEMENTS];
 
     int things_to_enqueue = (hrb_end - hrb_start) >> 11;
-
-    if (things_to_enqueue == 0) { return; }
 
     for (int i = 0; i < things_to_enqueue; i++) {
 
@@ -29,19 +28,7 @@ __global__ void __launch_bounds__(1024, 1) enheap(const uint64_t* hrb, uint64_t*
         heap_elements += 1;
     }
 
-    // update global counters:
-    global_counters[COUNTER_HRB_READING_HEAD] = hrb_start;
-    global_counters[COUNTER_HEAP_ELEMENTS] = heap_elements;
-}
-
-
-__global__ void __launch_bounds__(1024, 1) deheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size) {
-
-    __shared__ uint64_t smem[2048];
-    uint64_t hrb_start = global_counters[COUNTER_HRB_READING_HEAD];
-    uint64_t hrb_end   = global_counters[COUNTER_HRB_WRITING_HEAD];
-    int heap_elements  = global_counters[COUNTER_HEAP_ELEMENTS];
-    uint64_t middle_head = global_counters[COUNTER_MIDDLE_HEAD];
+    __syncthreads();
 
     if (threadIdx.x == 0) {
         global_counters[COUNTER_READING_HEAD] = middle_head;
@@ -75,18 +62,22 @@ __global__ void __launch_bounds__(1024, 1) deheap(const uint64_t* hrb, uint64_t*
             free_nodes[(middle_head + threadIdx.x + 1024) & prb_mask] = hrb[offset + 1024];
         }
         middle_head += extra_values;
-        global_counters[COUNTER_HRB_READING_HEAD] = 0;
-        global_counters[COUNTER_HRB_WRITING_HEAD] = 0;
+        hrb_start = 0;
+        if (threadIdx.x == 0) {
+            global_counters[COUNTER_HRB_WRITING_HEAD] = 0;
+        }
     }
 
-    global_counters[COUNTER_HEAP_ELEMENTS] = heap_elements;
-    global_counters[COUNTER_MIDDLE_HEAD] = middle_head << 1;
+    if (threadIdx.x == 0) {
+        global_counters[COUNTER_HRB_READING_HEAD] = hrb_start;
+        global_counters[COUNTER_HEAP_ELEMENTS] = heap_elements;
+        global_counters[COUNTER_MIDDLE_HEAD] = middle_head << 1;
+    }
 
 }
 
 void enheap_then_deheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size) {
 
-    enheap<<<1, 1024>>>(hrb, global_counters, heap, hrb_size);
-    deheap<<<1, 1024>>>(hrb, global_counters, heap, hrb_size, max_elements, free_nodes, prb_size);
+    heapmanager<<<1, 1024>>>(hrb, global_counters, heap, hrb_size, max_elements, free_nodes, prb_size);
 
 }

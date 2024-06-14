@@ -13,6 +13,7 @@
 #define MESSAGE_STATUS 2
 #define MESSAGE_INIT 3
 #define MESSAGE_DATA 4
+#define MESSAGE_SANKEY 5
 
 std::string format_string(const char* format, ...) {
     // Start with variadic arguments
@@ -38,6 +39,7 @@ std::string format_string(const char* format, ...) {
 struct PrintMessage {
     uint64_t message_type;
     std::string contents;
+    uint64_t metrics[64];
 };
 
 struct SolutionMessage {
@@ -195,51 +197,13 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
         solution_queue->enqueue(sm);
     }
 
-    // produce aelluvial diagram:
+    // send information for producing Sankey diagram:
     {
-        std::string aelluvial =
-        "   "    "%12llu               \033[32;1m%16llu\033[0m         " "%16llu       "        "%16llu\n"
-        "    original problems       *--> catalyst recovered    *--> restabilised      *---> low-period\n"
-        "             |             /                          /                      / \n"
-        "             |            /   "        "%16llu       / "        "%16llu     / \033[32;1m%16llu\033[0m \n"
-        "             |           *-----> became periodic ---*-----> oscillatory ---*------> high-period\n"
-        "             v           |                           L                   \n"
-        "   "        "%16llu      |    "        "%16llu        L\033[32;1m%16llu\033[0m \n"
-        "   problems processed ---*------> contradictory        *--> fizzled out  \n"
-        "             ^            L                                              \n"
-        "             |             L  "        "%16llu         "        "%16llu  \n"
-        "             |              *---> indeterminate ----*-----> deduplicated \n"
-        "             |                                      | \n"
-        "   "        "%16llu           "        "%16llu      | \n"
-        "       new problems <-------------- bifurcated <----* \n"
-        "             ^                           | \n"
-        "             |                           | \n"
-        "             *---------------------------* \n";
-        for (size_t i = 0; i < aelluvial.size(); i++) {
-            if (aelluvial[i] == 'L') { aelluvial[i] = '\\'; }
+        PrintMessage pm;
+        pm.message_type = MESSAGE_SANKEY;
+        for (int i = 0; i < 64; i++) {
+            pm.metrics[i] = totals[i];
         }
-        uint64_t original = totals[METRIC_KERNEL] - 2 * totals[METRIC_HARDBRANCH];
-        uint64_t periodic = totals[METRIC_OSCILLATOR] + totals[METRIC_RESTAB] + totals[METRIC_FIZZLE];
-        uint64_t indeterminate = totals[METRIC_KERNEL] - (totals[METRIC_DEADEND] + periodic + totals[METRIC_CATALYSIS]);
-        uint64_t high_period = totals[COUNTER_SOLUTION_HEAD] - totals[METRIC_FIZZLE] - totals[METRIC_CATALYSIS];
-        uint64_t low_period = totals[METRIC_OSCILLATOR] - high_period;
-        PrintMessage pm; pm.contents = format_string(aelluvial.c_str(),
-            (unsigned long long) original,
-            (unsigned long long) totals[METRIC_CATALYSIS],
-            (unsigned long long) totals[METRIC_RESTAB],
-            (unsigned long long) low_period,
-            (unsigned long long) periodic,
-            (unsigned long long) totals[METRIC_OSCILLATOR],
-            (unsigned long long) high_period,
-            (unsigned long long) totals[METRIC_KERNEL],
-            (unsigned long long) totals[METRIC_DEADEND],
-            (unsigned long long) totals[METRIC_FIZZLE],
-            (unsigned long long) indeterminate,
-            (unsigned long long) (indeterminate - totals[METRIC_HARDBRANCH]),
-            (unsigned long long) (2 * totals[METRIC_HARDBRANCH]),
-            (unsigned long long) totals[METRIC_HARDBRANCH]
-        );
-        pm.message_type = MESSAGE_SOLUTION;
         print_queue->enqueue(pm);
     }
 
@@ -322,10 +286,16 @@ void print_thread_loop(int num_writers, PrintQueue* print_queue) {
     int finished_writers = 0;
 
     uint64_t last_message_type = MESSAGE_INIT;
+    std::vector<uint64_t> totals(64);
 
     PrintMessage item;
     while (finished_writers != num_writers) {
         print_queue->wait_dequeue(item);
+
+        if (item.message_type == MESSAGE_SANKEY) {
+            for (int i = 0; i < 64; i++) { totals[i] = item.metrics[i]; }
+            continue;
+        }
 
         if (item.message_type == MESSAGE_KILL_THREAD) {
             finished_writers += 1;
@@ -345,5 +315,51 @@ void print_thread_loop(int num_writers, PrintQueue* print_queue) {
 
         last_message_type = item.message_type;
         std::cout << item.contents << std::endl;
+    }
+
+    // produce aelluvial diagram:
+    {
+        std::string aelluvial =
+        "   "    "%12llu               \033[32;1m%16llu\033[0m         " "%16llu       "        "%16llu\n"
+        "    original problems       *--> catalyst recovered    *--> restabilised      *---> low-period\n"
+        "             |             /                          /                      / \n"
+        "             |            /   "        "%16llu       / "        "%16llu     / \033[32;1m%16llu\033[0m \n"
+        "             |           *-----> became periodic ---*-----> oscillatory ---*------> high-period\n"
+        "             v           |                           L                   \n"
+        "   "        "%16llu      |    "        "%16llu        L\033[32;1m%16llu\033[0m \n"
+        "   problems processed ---*------> contradictory        *--> fizzled out  \n"
+        "             ^            L                                              \n"
+        "             |             L  "        "%16llu                           \n"
+        "             |              *---> indeterminate                          \n"
+        "             |                          |                                \n"
+        "   "        "%16llu"        "%16llu     | "        "%16llu               \n"
+        "       new problems <--- bifurcated <---*---> deduplicated               \n"
+        "             ^                | \n"
+        "             |                | \n"
+        "             *----------------* \n";
+        for (size_t i = 0; i < aelluvial.size(); i++) {
+            if (aelluvial[i] == 'L') { aelluvial[i] = '\\'; }
+        }
+        uint64_t original = totals[METRIC_KERNEL] - 2 * totals[METRIC_HARDBRANCH];
+        uint64_t periodic = totals[METRIC_OSCILLATOR] + totals[METRIC_RESTAB] + totals[METRIC_FIZZLE];
+        uint64_t indeterminate = totals[METRIC_KERNEL] - (totals[METRIC_DEADEND] + periodic + totals[METRIC_CATALYSIS]);
+        uint64_t high_period = totals[COUNTER_SOLUTION_HEAD] - totals[METRIC_FIZZLE] - totals[METRIC_CATALYSIS];
+        uint64_t low_period = totals[METRIC_OSCILLATOR] - high_period;
+        std::cout << format_string(aelluvial.c_str(),
+            (unsigned long long) original,
+            (unsigned long long) totals[METRIC_CATALYSIS],
+            (unsigned long long) totals[METRIC_RESTAB],
+            (unsigned long long) low_period,
+            (unsigned long long) periodic,
+            (unsigned long long) totals[METRIC_OSCILLATOR],
+            (unsigned long long) high_period,
+            (unsigned long long) totals[METRIC_KERNEL],
+            (unsigned long long) totals[METRIC_DEADEND],
+            (unsigned long long) totals[METRIC_FIZZLE],
+            (unsigned long long) indeterminate,
+            (unsigned long long) (2 * totals[METRIC_HARDBRANCH]),
+            (unsigned long long) totals[METRIC_HARDBRANCH],
+            (unsigned long long) (indeterminate - totals[METRIC_HARDBRANCH])
+        ) << std::endl;
     }
 }

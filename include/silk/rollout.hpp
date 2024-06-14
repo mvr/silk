@@ -100,7 +100,8 @@ _DI_ bool branched_rollout(
 
         uint32_t mask = get_branching_cells<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop);
 
-        if (hh::ballot_32((mask &~ cumulative_mask) != 0) == 0) { return false; }
+        mask &= ~cumulative_mask;
+        if (hh::ballot_32(mask != 0) == 0) { return false; }
         cumulative_mask |= mask;
 
         bool contradiction = apply_branched<false>([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
