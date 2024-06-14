@@ -38,6 +38,7 @@ std::string format_string(const char* format, ...) {
 
 struct PrintMessage {
     uint64_t message_type;
+    uint64_t return_code;
     std::string contents;
     uint64_t metrics[64];
 };
@@ -245,6 +246,7 @@ void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue
             if (item.return_code == 0) {
                 ss << "# Found fizzle" << std::endl;
             } else if (item.return_code == 1) {
+                // this should never happen:
                 ss << "# Found restabilisation" << std::endl;
             } else if (item.return_code == 1000000000) {
                 ss << "# Found catalysis" << std::endl;
@@ -268,6 +270,7 @@ void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue
 
             PrintMessage pm;
             pm.contents = ss.str();
+            pm.return_code = item.return_code;
             pm.message_type = item.message_type;
             print_queue->enqueue(pm);
         }
@@ -281,12 +284,29 @@ void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue
     }
 }
 
+void replace_number(std::string &src, const std::string &match, int64_t value) {
+
+    std::string replacement = format_string("%3lld", ((long long) value));
+    auto pos = src.find(match);
+    if (pos == std::string::npos) { return; }
+    if (replacement.size() > match.size()) {
+        pos -= (replacement.size() - match.size()) >> 1;
+    }
+    for (size_t i = 0; i < replacement.length(); i++) {
+        src[i + pos] = replacement[i];
+    }
+}
+
 void print_thread_loop(int num_writers, PrintQueue* print_queue) {
 
     int finished_writers = 0;
 
     uint64_t last_message_type = MESSAGE_INIT;
     std::vector<uint64_t> totals(64);
+
+    uint64_t completed_fizzles = 0;
+    uint64_t completed_oscs = 0;
+    uint64_t completed_catalyses = 0;
 
     PrintMessage item;
     while (finished_writers != num_writers) {
@@ -295,6 +315,16 @@ void print_thread_loop(int num_writers, PrintQueue* print_queue) {
         if (item.message_type == MESSAGE_SANKEY) {
             for (int i = 0; i < 64; i++) { totals[i] = item.metrics[i]; }
             continue;
+        }
+
+        if (item.message_type == MESSAGE_SOLUTION) {
+            if (item.return_code == 0) {
+                completed_fizzles += 1;
+            } else if (item.return_code == 1000000000) {
+                completed_catalyses += 1;
+            } else {
+                completed_oscs += 1;
+            }
         }
 
         if (item.message_type == MESSAGE_KILL_THREAD) {
@@ -320,46 +350,58 @@ void print_thread_loop(int num_writers, PrintQueue* print_queue) {
     // produce aelluvial diagram:
     {
         std::string aelluvial =
-        "   "    "%12llu               \033[32;1m%16llu\033[0m         " "%16llu       "        "%16llu\n"
-        "    original problems       *--> catalyst recovered    *--> restabilised      *---> low-period\n"
-        "             |             /                          /                      / \n"
-        "             |            /   "        "%16llu       / "        "%16llu     / \033[32;1m%16llu\033[0m \n"
-        "             |           *-----> became periodic ---*-----> oscillatory ---*------> high-period\n"
-        "             v           |                           L                   \n"
-        "   "        "%16llu      |    "        "%16llu        L\033[32;1m%16llu\033[0m \n"
-        "   problems processed ---*------> contradictory        *--> fizzled out  \n"
-        "             ^            L                                              \n"
-        "             |             L  "        "%16llu                           \n"
-        "             |              *---> indeterminate                          \n"
-        "             |                          |                                \n"
-        "   "        "%16llu"        "%16llu     | "        "%16llu               \n"
-        "       new problems <--- bifurcated <---*---> deduplicated               \n"
-        "             ^                | \n"
-        "             |                | \n"
-        "             *----------------* \n";
-        for (size_t i = 0; i < aelluvial.size(); i++) {
-            if (aelluvial[i] == 'L') { aelluvial[i] = '\\'; }
-        }
+
+        "       [A]                                             [J]                 [M]                      \n"
+        "original problems                             *--> restabilised   *--> low-period                   \n"
+        "        |                                    /                    |                                 \n"
+        "        |                         [H]       /          [K]        |        [N]              [Q]     \n"
+        "        |                *---> periodic ---*-----> oscillatory ---*--> high-period --*--> completed \n"
+        "        v               /                   L                                        |   oscillators\n"
+        "       [B]             /          [G]        L         [L]                 [P]       |       \n"
+        "problems processed ---*---> contradictory     *--> fizzled out ---*--> completed     |       \n"
+        "        ^             |                                           |     fizzles      |       \n"
+        "        |             |           [F]                     [O]     |                  |       \n"
+        "       [C]            *---> catalyst recovered ---*--> completed  |                  |       \n"
+        "  new problems        |                           |    catalyses  |                  |       \n"
+        "      ^   ^           |           [E]             |               |                  |       \n"
+        "      |   |           *---> indeterminate         |               v        [R]       v       \n"
+        "      |   |                        |              *--> determined uncompletable by SAT solver\n"
+        "      |   |            [D]         |                                    \n"
+        "      |   *-------- bifurcated <---*                                    \n"
+        "      |                 |          |                  [I]               \n"
+        "      *-----------------*          *---> deduplicated by a Bloom filter \n";
+
         uint64_t original = totals[METRIC_KERNEL] - 2 * totals[METRIC_HARDBRANCH];
         uint64_t periodic = totals[METRIC_OSCILLATOR] + totals[METRIC_RESTAB] + totals[METRIC_FIZZLE];
         uint64_t indeterminate = totals[METRIC_KERNEL] - (totals[METRIC_DEADEND] + periodic + totals[METRIC_CATALYSIS]);
         uint64_t high_period = totals[COUNTER_SOLUTION_HEAD] - totals[METRIC_FIZZLE] - totals[METRIC_CATALYSIS];
         uint64_t low_period = totals[METRIC_OSCILLATOR] - high_period;
-        std::cout << format_string(aelluvial.c_str(),
-            (unsigned long long) original,
-            (unsigned long long) totals[METRIC_CATALYSIS],
-            (unsigned long long) totals[METRIC_RESTAB],
-            (unsigned long long) low_period,
-            (unsigned long long) periodic,
-            (unsigned long long) totals[METRIC_OSCILLATOR],
-            (unsigned long long) high_period,
-            (unsigned long long) totals[METRIC_KERNEL],
-            (unsigned long long) totals[METRIC_DEADEND],
-            (unsigned long long) totals[METRIC_FIZZLE],
-            (unsigned long long) indeterminate,
-            (unsigned long long) (2 * totals[METRIC_HARDBRANCH]),
-            (unsigned long long) totals[METRIC_HARDBRANCH],
-            (unsigned long long) (indeterminate - totals[METRIC_HARDBRANCH])
-        ) << std::endl;
+
+        uint64_t rejected = (totals[METRIC_CATALYSIS] + totals[METRIC_FIZZLE] + high_period) - (completed_catalyses + completed_fizzles + completed_oscs);
+
+        replace_number(aelluvial, "[A]", original);
+        replace_number(aelluvial, "[B]", totals[METRIC_KERNEL]);
+        replace_number(aelluvial, "[C]", 2 * totals[METRIC_HARDBRANCH]);
+        replace_number(aelluvial, "[D]", totals[METRIC_HARDBRANCH]);
+        replace_number(aelluvial, "[E]", indeterminate);
+        replace_number(aelluvial, "[F]", totals[METRIC_CATALYSIS]);
+        replace_number(aelluvial, "[G]", totals[METRIC_DEADEND]);
+        replace_number(aelluvial, "[H]", periodic);
+        replace_number(aelluvial, "[I]", indeterminate - totals[METRIC_HARDBRANCH]);
+        replace_number(aelluvial, "[J]", totals[METRIC_RESTAB]);
+        replace_number(aelluvial, "[K]", totals[METRIC_OSCILLATOR]);
+        replace_number(aelluvial, "[L]", totals[METRIC_FIZZLE]);
+        replace_number(aelluvial, "[M]", low_period);
+        replace_number(aelluvial, "[N]", high_period);
+        replace_number(aelluvial, "[O]", completed_catalyses);
+        replace_number(aelluvial, "[P]", completed_fizzles);
+        replace_number(aelluvial, "[Q]", completed_oscs);
+        replace_number(aelluvial, "[R]", rejected);
+
+        for (size_t i = 0; i < aelluvial.size(); i++) {
+            if (aelluvial[i] == 'L') { aelluvial[i] = '\\'; }
+        }
+
+        std::cout << aelluvial << std::endl;
     }
 }
