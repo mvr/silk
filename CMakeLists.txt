@@ -1,6 +1,12 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.5)
 project(silk)
 set(CMAKE_CXX_STANDARD 17)
+
+if(CMAKE_VERSION VERSION_LESS "3.24.0")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=native")
+else()
+set(CMAKE_CUDA_ARCHITECTURES "native")
+endif()
 
 add_compile_options( -O3 -g )
 add_link_options( -lpthread )
