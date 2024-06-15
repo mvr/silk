@@ -77,11 +77,10 @@ the maximum capacity of the heap. When the heap is more than 75% full,
 we set the batch size to be the minimum of 4096. Between those, we
 vary it linearly with a gradient of $`-\frac{1}{8}`$ as shown above.
 
-Data structures
----------------
+Problem representation
+----------------------
 
-In a stable pattern in Conway's Game of Life (one that doesn't change
-from one generation to the next), each cell must be of one of eight
+In our stable background $`S`$, each cell must be of one of eight
 different 'types':
 
  - dead with 0 live neighbours;
@@ -93,12 +92,15 @@ different 'types':
  - dead with 5 live neighbours;
  - dead with 6 live neighbours;
 
-which are abbreviated to d0, d1, d2, l2, l3, d4, d5, and d6. We
-follow the design of Barrister by having a Boolean variable per cell
-for each of these 8 types, specifying whether or not we know that
-the cell is definitely not of that type. These are packed into
-bitplanes, allowing logical operations to be performed in parallel
-at every location in the plane using bitwise instructions.
+which are abbreviated to d0, d1, d2, l2, l3, d4, d5, and d6.
+
+However, in any node of the search tree we only have partial
+information about $`S`$. We follow the design of Barrister by having
+a Boolean variable per cell for each of these 8 types, specifying
+whether or not we know that the cell is definitely not of that type.
+These are packed into bitplanes, allowing logical operations to be
+performed in parallel at every location in the plane using bitwise
+instructions.
 
 As the background is a $`64 \times 64`$ torus, those eight bitplanes
 together occupy 4096 bytes. We need another 128 bytes to store the
@@ -109,4 +111,73 @@ obtained when we make a branching decision. (As such, each individual
 problem occupies 2240 bytes amortized, and the maximum capacity $`N`$
 of the heap is, to a first approximation, the amount of free GPU
 memory divided by 2240.)
+
+Main kernel
+-----------
+
+The vast majority of the runtime is spent in a GPU kernel, entitled
+`computecellorbackup()` as an homage to the function in Hickerson's
+**dr** search program responsible for traversing the tree. We launch
+$`B`$ threadblocks, each containing a single warp (32 threads). At
+a high level, each threadblock of the kernel proceeds as follows:
+
+ - load an open problem from global memory into registers;
+ - perform as many logical inferences about $`S`$ as possible,
+   advancing the active perturbation $`P`$ whenever we have
+   sufficient information to do so;
+ - if we enter a cycle or reach a contradiction, terminate;
+ - otherwise, i.e. we do not have sufficient information to compute
+   the next generation of $`P`$, select a cell of $`P`$ whose next
+   state is unknown and make a binary decision based on that cell;
+ - enqueue the two resulting subproblems into the ring buffer.
+
+After the kernel completes, these subproblems are moved from the
+ring buffer to the heap, and then we retrieve the next batch of
+$`B`$ problems from that heap. (If there are fewer than $`B`$
+problems in the heap, then we consume the entire contents of both
+the heap and the 'remainder' in the ring buffer.)
+
+Most of the time in `computecellorbackup()` is spent performing
+logical inferences: we perform 'soft branching' where we take a
+cell in $`S`$ whose state is not fully specified (i.e. more than
+one of the eight different types haven't yet been ruled out),
+take all of these branches, performing unit propagation and
+rollouts, and taking the intersection of the information deduced
+in all of the non-contradictory branches. This is all bitsliced
+and vectorised: we focus on the $`32 \times 32`$ patch centred
+on the current perturbation $`P`$, where each of the 32 threads
+holds a row of a bitplane in a 32-bit register; the logic is
+then expressible as a complicated sequence of bitwise operations,
+left/right shifts, and up/down shuffles.
+
+When we come to choose a cell at the end to bifurcate upon (known as
+'hard branching' to distinguish from the 'soft branching' performed
+inside the main loop in the kernel), we use a neural network that
+was trained on 700 gigabytes of training data produced by Silk. This
+reduces the search tree size by several percent. The neural network
+was architecturally inspired by the Stockfish chess engine's
+[NNUE](https://cp4space.hatsya.com/2021/01/08/the-neural-network-of-the-stockfish-chess-engine/)
+and uses local information around the candidate branching cell to
+compute a 'value function' of how undesirable it is to split on that
+cell; we choose the cell that minimises this function.
+
+In every generation we need to fully know both the cells $`P`$ in
+the active perturbation together with the stable state $`S`$
+restricted to those cells. In other words, we need to know for every
+cell which of the three cases applies:
+
+ - **stable**: the cell is equal to the background, so is not part
+   of the active perturbation $`P`$.
+ - **high**: the cell is live in the current generation and dead
+   in the background state.
+ - **low**: the cell is dead in the current generation and live
+   in the background state.
+
+If we cannot advance because this information is not known for every
+cell in the next generation, we choose a cell and either bifurcate
+on "stable vs high/low" (if it's not known whether or not it is
+stable on the next generation) or else bifurcate on "high vs low"
+(if it's known to not be stable in the next generation, but we don't
+know whether it is high or low).
+
 
