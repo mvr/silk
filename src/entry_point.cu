@@ -342,13 +342,6 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
             }
         }
     }
-
-    {
-        // signal to the status queue that we've finished:
-        SolutionMessage sm;
-        sm.message_type = MESSAGE_KILL_THREAD;
-        status_queue->enqueue(sm);
-    }
 }
 
 void gpu_thread_loop(SolutionQueue *status_queue, int stream_id, int device_id, size_t prb_capacity, const float4* nnue, bool make_data,
@@ -359,7 +352,7 @@ void gpu_thread_loop(SolutionQueue *status_queue, int stream_id, int device_id, 
     auto problem = ph->swizzle_problem();
     auto stator = ph->swizzle_stator();
 
-    // if (stream_id != 0) { problem.clear(); }
+    if (stream_id != 0) { problem.clear(); }
 
     // these probably don't need changing:
     size_t srb_capacity = 16384;
@@ -371,6 +364,12 @@ void gpu_thread_loop(SolutionQueue *status_queue, int stream_id, int device_id, 
 
     run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, min_stable);
 
+    {
+        // signal to the status queue that we've finished:
+        SolutionMessage sm;
+        sm.message_type = MESSAGE_KILL_THREAD;
+        status_queue->enqueue(sm);
+    }
 }
 
 int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int min_stable, std::string dataset_filename) {
@@ -403,6 +402,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     }
 
     std::vector<std::pair<uint64_t, float4*>> device_infos;
+    int num_streams = 0;
 
     // ***** LOAD NNUE AND COPY TO DEVICES *****
     {
@@ -420,6 +420,8 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         fread(nnue_h, 512, 7473, fptr);
         fclose(fptr);
 
+        std::cerr << "Info: probing " << num_devices << " devices..." << std::endl;
+
         for (int i = 0; i < num_devices; i++) {
             REPORT_EXIT(cudaSetDevice(i))
             size_t free_mem = 0;
@@ -427,12 +429,13 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
             REPORT_EXIT(cudaMemGetInfo(&free_mem, &total_mem))
             free_mem >>= 20;
             total_mem >>= 20;
-            std::cerr << "Info: device " << i << " has " << free_mem << " MiB free and " << total_mem << " MiB total." << std::endl;
+            std::cerr << "    -- device " << i << " has " << free_mem << " MiB free and " << total_mem << " MiB total." << std::endl;
             if (free_mem >= 256) {
                 float4* nnue_d;
                 REPORT_EXIT(cudaMalloc((void**) &nnue_d, NNUE_BYTES))
                 REPORT_EXIT(cudaMemcpy(nnue_d, nnue_h, NNUE_BYTES, cudaMemcpyHostToDevice))
                 device_infos.emplace_back((free_mem << 32) | ((uint64_t) i), nnue_d);
+                num_streams += (free_mem >= 512) ? 2 : 1;
             }
             REPORT_EXIT(cudaDeviceSynchronize())
         }
@@ -458,6 +461,8 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     std::vector<std::thread> gpu_threads;
 
+    std::cerr << "Info: creating " << num_streams << " streams..." << std::endl;
+
     for (auto&& x : device_infos) {
         size_t free_megabytes = x.first >> 32;
         std::vector<size_t> stream_capacities(2);
@@ -476,14 +481,12 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
                 int stream_id = gpu_threads.size();
                 int device_id = ((uint32_t) x.first);
                 const float4* nnue = x.second;
-                std::cerr << "Info: Creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
+                std::cerr << "    -- creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
                 gpu_threads.emplace_back(gpu_thread_loop, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
                                         active_width, active_height, active_pop, &ph, min_report_period, min_stable);
             }
         }
     }
-
-    int num_streams = gpu_threads.size();
 
     std::thread status_thread(status_thread_loop, num_streams, num_cadical_threads, &status_queue, &solution_queue, &print_queue, dataset_filename);
     std::vector<std::thread> cadical_threads;
