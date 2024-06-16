@@ -5,19 +5,6 @@
 
 namespace kc {
 
-_DI_ void load4(const uint4* ptr, uint32_t &a, uint32_t &b, uint32_t &c, uint32_t &d) {
-    uint4 r = ptr[threadIdx.x];
-    a = r.x; b = r.y; c = r.z; d = r.w;
-}
-
-_DI_ uint32_t save4(uint4* ptr, uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
-    uint4 r; r.x = a; r.y = b; r.z = c; r.w = d;
-    uint32_t res = hh::popc32(a) + hh::popc32(b) + hh::popc32(c) + hh::popc32(d);
-    ptr[threadIdx.x] = r;
-    return res;
-}
-
-
 template<typename Fn>
 _DI_ float hard_branch(
         uint4* writing_location, uint32_t perturbation, uint32_t &metadata_z, uint32_t &metadata_out,

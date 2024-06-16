@@ -128,11 +128,11 @@ inline void swizzle_subproblem(uint32_t* res, const uint64_t* constraints, const
         }
 
         for (int y = 0; y < 32; y++) {
-            int res_offset = 4 * y + (z & 3) + (z & 4) * 32;
-            res[res_offset]        = con[y] >> 32; // upper-right
-            res[res_offset + 256]  = con[y + 32];  // lower-left
-            res[res_offset + 512]  = con[y + 32] >> 32; // lower-right
-            res[res_offset + 768]  = con[y]; // upper-left
+            int res_offset = 128 * z + 4 * y;
+            res[res_offset + 0]  = con[y]; // upper-left
+            res[res_offset + 1]  = con[y] >> 32; // upper-right
+            res[res_offset + 2]  = con[y + 32];  // lower-left
+            res[res_offset + 3]  = con[y + 32] >> 32; // lower-right
         }
     }
 

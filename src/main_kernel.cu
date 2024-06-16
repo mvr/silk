@@ -59,15 +59,14 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     uint32_t perturbation = problem_metadata_location[threadIdx.x + 32];
 
     // load stable information:
-    uint4 ad0, ad1, ad2, al2, al3, ad4, ad5, ad6;
-    kc::load4(reading_location,       ad0.y, ad1.y, ad2.y, al2.y);
-    kc::load4(reading_location + 32,  al3.y, ad4.y, ad5.y, ad6.y);
-    kc::load4(reading_location + 64,  ad0.z, ad1.z, ad2.z, al2.z);
-    kc::load4(reading_location + 96,  al3.z, ad4.z, ad5.z, ad6.z);
-    kc::load4(reading_location + 128, ad0.w, ad1.w, ad2.w, al2.w);
-    kc::load4(reading_location + 160, al3.w, ad4.w, ad5.w, ad6.w);
-    kc::load4(reading_location + 192, ad0.x, ad1.x, ad2.x, al2.x);
-    kc::load4(reading_location + 224, al3.x, ad4.x, ad5.x, ad6.x);
+    uint4 ad0 = reading_location[threadIdx.x];
+    uint4 ad1 = reading_location[threadIdx.x + 32];
+    uint4 ad2 = reading_location[threadIdx.x + 64];
+    uint4 al2 = reading_location[threadIdx.x + 96];
+    uint4 al3 = reading_location[threadIdx.x + 128];
+    uint4 ad4 = reading_location[threadIdx.x + 160];
+    uint4 ad5 = reading_location[threadIdx.x + 192];
+    uint4 ad6 = reading_location[threadIdx.x + 224];
 
     // load stator constraints and shift into the correct reference frame:
     uint32_t px = hh::shuffle_32(metadata_y, 2);
@@ -193,14 +192,14 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     uint4* writing_location = prb + uint4s_per_pp * output_idx;
 
     uint32_t total_info = 0; // between 0 and 32768
-    total_info += kc::save4(writing_location,       ad0.y, ad1.y, ad2.y, al2.y);
-    total_info += kc::save4(writing_location + 32,  al3.y, ad4.y, ad5.y, ad6.y);
-    total_info += kc::save4(writing_location + 64,  ad0.z, ad1.z, ad2.z, al2.z);
-    total_info += kc::save4(writing_location + 96,  al3.z, ad4.z, ad5.z, ad6.z);
-    total_info += kc::save4(writing_location + 128, ad0.w, ad1.w, ad2.w, al2.w);
-    total_info += kc::save4(writing_location + 160, al3.w, ad4.w, ad5.w, ad6.w);
-    total_info += kc::save4(writing_location + 192, ad0.x, ad1.x, ad2.x, al2.x);
-    total_info += kc::save4(writing_location + 224, al3.x, ad4.x, ad5.x, ad6.x);
+    writing_location[threadIdx.x]       = ad0; total_info += kc::popc128(ad0);
+    writing_location[threadIdx.x + 32]  = ad1; total_info += kc::popc128(ad1);
+    writing_location[threadIdx.x + 64]  = ad2; total_info += kc::popc128(ad2);
+    writing_location[threadIdx.x + 96]  = al2; total_info += kc::popc128(al2);
+    writing_location[threadIdx.x + 128] = al3; total_info += kc::popc128(al3);
+    writing_location[threadIdx.x + 160] = ad4; total_info += kc::popc128(ad4);
+    writing_location[threadIdx.x + 192] = ad5; total_info += kc::popc128(ad5);
+    writing_location[threadIdx.x + 224] = ad6; total_info += kc::popc128(ad6);
     total_info = hh::warp_add(total_info);
 
     __syncthreads();
