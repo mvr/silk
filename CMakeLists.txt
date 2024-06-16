@@ -19,7 +19,7 @@ set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 
 if(CMAKE_CUDA_COMPILER)
 enable_language(CUDA)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v -lineinfo -std=c++17")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread --ptxas-options=-v -lineinfo -std=c++17")
 endif()
 
 add_subdirectory(cedilla)

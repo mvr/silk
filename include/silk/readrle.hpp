@@ -197,7 +197,7 @@ struct ProblemHolder {
         return complete_still_life(&(constraints[0]), 4, true);
     }
 
-    std::vector<uint32_t> swizzle_stator() {
+    std::vector<uint32_t> swizzle_stator() const {
         std::vector<uint32_t> res(128);
         for (int y = 0; y < 32; y++) {
             res[4 * y]     = stator[y];
@@ -208,7 +208,7 @@ struct ProblemHolder {
         return res;
     }
 
-    std::vector<uint32_t> swizzle_problem() {
+    std::vector<uint32_t> swizzle_problem() const {
         std::vector<uint32_t> res(1120 * num_subproblems);
 
         for (int z = 0; z < num_subproblems; z++) {

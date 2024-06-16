@@ -62,7 +62,6 @@ struct SilkGPU {
     uint4* srb; // solution ring buffer
     int32_t* smd; // solution metadata
     uint64_t* global_counters;
-    float4* nnue;
     uint8_t* dataset;
     float* predictions;
     uint32_t* freenodes;
@@ -106,7 +105,6 @@ struct SilkGPU {
         cudaMalloc((void**) &srb, 4096 * srb_capacity);
         cudaMalloc((void**) &smd, 4 * srb_capacity);
         cudaMalloc((void**) &global_counters, 512);
-        cudaMalloc((void**) &nnue, NNUE_BYTES);
 
         cudaMalloc((void**) &freenodes, 2 * prb_capacity);
         cudaMallocHost((void**) &host_freenodes, 2 * prb_capacity);
@@ -136,7 +134,6 @@ struct SilkGPU {
         cudaMemcpy(freenodes, host_freenodes, 2 * prb_capacity, cudaMemcpyHostToDevice);
 
         cudaMemset(ctx, 0, 512);
-        cudaMemset(nnue, 0, NNUE_BYTES);
 
         max_width = active_width;
         max_height = active_height;
@@ -151,7 +148,6 @@ struct SilkGPU {
         cudaFree(srb);
         cudaFree(smd);
         cudaFree(global_counters);
-        cudaFree(nnue);
         cudaFree(freenodes);
         cudaFree(heap);
         cudaFree(hrb);
@@ -178,10 +174,12 @@ struct SilkGPU {
 
         cudaMemcpy(global_counters, host_counters, 512, cudaMemcpyHostToDevice);
         cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
-        cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
+        if (num_problems > 0) {
+            cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
+        }
     }
 
-    void run_main_kernel(int blocks_to_launch, int open_problems, int min_period, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int batches = 4) {
+    void run_main_kernel(const float4* nnue, int blocks_to_launch, int open_problems, int min_period, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int batches = 4) {
 
         // if we are generating training data, then explore more
         // (75% random + 25% NNUE); otherwise, mostly follow the
@@ -288,7 +286,7 @@ struct SilkGPU {
     }
 };
 
-void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period, int min_stable) {
+void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period, int min_stable) {
 
     int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
     uint64_t last_solution_count = 0;
@@ -303,14 +301,14 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
         batch_size &= 0x7ffff000;
 
-        silk.run_main_kernel(problems, open_problems, min_report_period, min_stable, batch_size, make_data, status_queue);
+        silk.run_main_kernel(nnue, problems, open_problems, min_report_period, min_stable, batch_size, make_data, status_queue);
 
         open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
         {
             // report to status queue:
             SolutionMessage sm; sm.message_type = MESSAGE_STATUS;
-            sm.return_code = 0; // TODO put device ID here
+            sm.return_code = stream_id; // identify origin of status message:
             for (int i = 0; i < 64; i++) { sm.metrics[i] = silk.host_counters[i]; }
             sm.metrics[METRIC_PRB_SIZE] = silk.prb_size;
             sm.metrics[METRIC_BATCH_SIZE] = problems;
@@ -353,7 +351,31 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
     }
 }
 
+void gpu_thread_loop(SolutionQueue *status_queue, int stream_id, int device_id, size_t prb_capacity, const float4* nnue, bool make_data,
+    int active_width, int active_height, int active_pop, const kc::ProblemHolder *ph, int min_report_period, int min_stable) {
+
+    cudaSetDevice(device_id);
+
+    auto problem = ph->swizzle_problem();
+    auto stator = ph->swizzle_stator();
+
+    // if (stream_id != 0) { problem.clear(); }
+
+    // these probably don't need changing:
+    size_t srb_capacity = 16384;
+    size_t drb_capacity = make_data ? 1048576 : 0;
+
+    SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
+
+    silk.inject_problem(problem, stator);
+
+    run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, min_stable);
+
+}
+
 int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int min_stable, std::string dataset_filename) {
+
+    #define REPORT_EXIT(X) if (hh::reportCudaError(X)) { std::cerr << "Error: Silk aborting due to irrecoverable GPU error." << std::endl; return 1; }
 
     // ***** LOAD PROBLEM *****
 
@@ -369,44 +391,23 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         std::cerr << "Info: initial perturbation has " << ppc << " cells." << std::endl;
     }
 
-    auto problem = ph.swizzle_problem();
-    auto stator = ph.swizzle_stator();
-
     // ***** CHECK CUDA IS WORKING CORRECTLY *****
 
-    size_t free_mem = 0;
-    size_t total_mem = 0;
+    int num_devices = 0;
 
-    if (hh::reportCudaError(cudaMemGetInfo(&free_mem, &total_mem))) {
-        std::cerr << "Error: Silk aborting due to irrecoverable GPU error." << std::endl;
+    REPORT_EXIT(cudaGetDeviceCount(&num_devices))
+
+    if (num_devices <= 0) {
+        std::cerr << "Error: no CUDA-capable GPUs were detected." << std::endl;
         return 1;
     }
 
-    std::cerr << "Info: GPU memory statistics: " << free_mem << " bytes free; " << total_mem << " bytes total." << std::endl;
+    std::vector<std::pair<uint64_t, float4*>> device_infos;
 
-    if (free_mem < ((size_t) (1 << 28))) {
-        std::cerr << "Error: Silk requires at least 256 MiB of free GPU memory to run correctly." << std::endl;
-        return 1;
-    }
-
-    bool make_data = dataset_filename.size() > 0;
-
-    // these probably don't need changing:
-    size_t srb_capacity = 16384;
-    size_t drb_capacity = make_data ? 1048576 : 0;
-    free_mem -= (srb_capacity + 4096) * 4096;
-    free_mem -= drb_capacity * 32;
-
-    // calculate maximum prb_capacity that fits in free memory:
-    size_t prb_capacity = free_mem / 2304;
-    prb_capacity = 1 << hh::constexpr_log2(prb_capacity);
-
-    std::cerr << "Info: allocating ring buffer to accommodate " << prb_capacity << " open problems." << std::endl;
-
-    SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
-
+    // ***** LOAD NNUE AND COPY TO DEVICES *****
     {
         uint4* nnue_h;
+
         cudaMallocHost((void**) &nnue_h, NNUE_BYTES);
         // load NNUE:
         FILE *fptr = fopen(nnue_filename.c_str(), "r");
@@ -418,11 +419,36 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
         fread(nnue_h, 512, 7473, fptr);
         fclose(fptr);
-        cudaMemcpy(silk.nnue, nnue_h, NNUE_BYTES, cudaMemcpyHostToDevice);
+
+        for (int i = 0; i < num_devices; i++) {
+            REPORT_EXIT(cudaSetDevice(i))
+            size_t free_mem = 0;
+            size_t total_mem = 0;
+            REPORT_EXIT(cudaMemGetInfo(&free_mem, &total_mem))
+            free_mem >>= 20;
+            total_mem >>= 20;
+            std::cerr << "Info: device " << i << " has " << free_mem << " MiB free and " << total_mem << " MiB total." << std::endl;
+            if (free_mem >= 256) {
+                float4* nnue_d;
+                REPORT_EXIT(cudaMalloc((void**) &nnue_d, NNUE_BYTES))
+                REPORT_EXIT(cudaMemcpy(nnue_d, nnue_h, NNUE_BYTES, cudaMemcpyHostToDevice))
+                device_infos.emplace_back((free_mem << 32) | ((uint64_t) i), nnue_d);
+            }
+            REPORT_EXIT(cudaDeviceSynchronize())
+        }
+
         cudaFreeHost(nnue_h);
     }
 
-    silk.inject_problem(problem, stator);
+    if (device_infos.size() == 0) {
+        std::cerr << "Error: no devices were found with sufficient memory." << std::endl;
+        return 1;
+    }
+
+    // sort descending, so that the devices with greater memory come first:
+    std::sort(device_infos.rbegin(), device_infos.rend());
+
+    bool make_data = dataset_filename.size() > 0;
 
     // ***** ESTABLISH COMMUNICATIONS *****
 
@@ -430,7 +456,36 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     SolutionQueue solution_queue;
     PrintQueue print_queue;
 
-    std::thread status_thread(status_thread_loop, 1, num_cadical_threads, &status_queue, &solution_queue, &print_queue, dataset_filename);
+    std::vector<std::thread> gpu_threads;
+
+    for (auto&& x : device_infos) {
+        size_t free_megabytes = x.first >> 32;
+        std::vector<size_t> stream_capacities(2);
+
+        if (free_megabytes < 512) {
+            stream_capacities[0] = 65536;
+            stream_capacities[1] = 0;
+        } else {
+            free_megabytes -= 224;
+            stream_capacities[0] = 8192 << hh::constexpr_log2(free_megabytes / 27);
+            stream_capacities[1] = 4096 << hh::constexpr_log2(free_megabytes / 18);
+        }
+
+        for (auto&& prb_capacity : stream_capacities) {
+            if (prb_capacity > 0) {
+                int stream_id = gpu_threads.size();
+                int device_id = ((uint32_t) x.first);
+                const float4* nnue = x.second;
+                std::cerr << "Info: Creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
+                gpu_threads.emplace_back(gpu_thread_loop, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
+                                        active_width, active_height, active_pop, &ph, min_report_period, min_stable);
+            }
+        }
+    }
+
+    int num_streams = gpu_threads.size();
+
+    std::thread status_thread(status_thread_loop, num_streams, num_cadical_threads, &status_queue, &solution_queue, &print_queue, dataset_filename);
     std::vector<std::thread> cadical_threads;
     std::thread print_thread(print_thread_loop, num_cadical_threads + 1, &print_queue);
 
@@ -438,13 +493,21 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         cadical_threads.emplace_back(solution_thread_loop, &solution_queue, &print_queue);
     }
 
-    run_main_loop(silk, &(ph.perturbation[0]), &status_queue, make_data, min_report_period, min_stable);
-
     // ***** TEAR DOWN THREADS *****
+
+    for (int i = 0; i < num_streams; i++) { gpu_threads[i].join(); }
+
+    for (auto&& x : device_infos) {
+        REPORT_EXIT(cudaSetDevice(((uint32_t) x.first)))
+        REPORT_EXIT(cudaDeviceSynchronize())
+        REPORT_EXIT(cudaFree(x.second))
+    }
 
     status_thread.join();
     for (int i = 0; i < num_cadical_threads; i++) { cadical_threads[i].join(); }
     print_thread.join();
 
     return 0;
+
+    #undef REPORT_EXIT
 }

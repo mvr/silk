@@ -38,7 +38,7 @@ void launch_main_kernel(
     uint4* srb, // solution ring buffer
     int32_t* smd, // solution metadata
     uint64_t* global_counters,
-    float4* nnue,
+    const float4* nnue,
     const uint32_t* freenodes,
     uint64_t* hrb,
 
