@@ -28,11 +28,14 @@ _DI_ uint32_t random_rotate(uint32_t x, uint32_t y) {
 }
 
 /**
- * Produces a 1024-bit value (32 bits per thread) where exactly 32 of the
+ * Produces a 1024-bit value (32 bits per thread) where exactly k of the
  * 1024 bits are set.
  */
-_DI_ uint32_t sparse_random(uint32_t input) {
-    uint32_t x = (1u << (input & 31));
+_DI_ uint32_t sparse_random(uint32_t input, int k) {
+
+    uint32_t x = 0;
+
+    if ((threadIdx.x & 31) < k) { x = (1u << (input & 31)); }
     x = partial_shuffle(x, hh::ballot_32(input & 32), 1);
     x = random_rotate(x, input >> 10);
     x = partial_shuffle(x, hh::ballot_32(input & 64), 2);
