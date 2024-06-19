@@ -39,13 +39,25 @@ The first argument, `examples/2c3.rle`, is a LifeHistory RLE file
 specifying a search problem. This can be edited using a program such
 as Golly, and the different cell colours have different meanings:
 
-* State 0: off in stable background
-* State 1: off in stable background + on in active perturbation
-* State 2: unknown in stable background
-* State 3: on in stable background
-* State 4: like state 0, but must stay off forever
-* State 5: like state 3, but must stay on forever
-* State 6: at least one of these cells must be on in stable background
+* State 0 (black): off in stable background
+* State 1 (green): off in stable background + on in active perturbation
+* State 2 (blue): unknown in stable background
+* State 3 (white): on in stable background
+* State 4 (red): like state 0, but must stay off forever
+* State 5 (yellow): like state 3, but must stay on forever
+* State 6 (grey): at least one of these cells must be on in stable background
+
+![example input](./docs/example_input.png)
+
+In particular we use the state 4 and 5 cells to specify the stator
+(unchanging part) of a particular known signal wire, and state 0 and 3
+cells to specify the rotor (changing part) of the wire. The signal itself
+is state 1 (green) and travels diagonally southeast along the wire. We
+leave the termination unknown (blue) so that Silk will search for ways
+to complete the signal wire. The state-0 triangles followed by a state-6
+triangle is a way to reduce the search space, so that it doesn't waste
+time finding lots of copies of the same signal termination differing only
+in the length of the wire.
 
 The next three command-line arguments are the maximum width, height,
 and cell count of the **active region** (described in the next section).
