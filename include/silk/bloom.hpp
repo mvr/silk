@@ -36,15 +36,15 @@ _DI_ uint32_t sparse_random(uint32_t input, int k) {
     uint32_t x = 0;
 
     if ((threadIdx.x & 31) < k) { x = (1u << (input & 31)); }
-    x = partial_shuffle(x, hh::ballot_32(input & 32), 1);
+    x = partial_shuffle(x, hh::ballot_32(input & 32), 16);
     x = random_rotate(x, input >> 10);
-    x = partial_shuffle(x, hh::ballot_32(input & 64), 2);
+    x = partial_shuffle(x, hh::ballot_32(input & 64), 8);
     x = random_rotate(x, input >> 15);
     x = partial_shuffle(x, hh::ballot_32(input & 128), 4);
     x = random_rotate(x, input >> 20);
-    x = partial_shuffle(x, hh::ballot_32(input & 256), 8);
+    x = partial_shuffle(x, hh::ballot_32(input & 256), 2);
     x = random_rotate(x, input >> 25);
-    x = partial_shuffle(x, hh::ballot_32(input & 512), 16);
+    x = partial_shuffle(x, hh::ballot_32(input & 512), 1);
     x = random_rotate(x, input);
     return x;
 }
