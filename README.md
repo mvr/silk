@@ -6,6 +6,55 @@ Silk: a CUDA drifter searcher
 underlying algorithm, modulo a few tweaks, to CUDA in order to benefit
 from the much greater parallelism present on GPUs.
 
+Quick start
+-----------
+
+There is a [notebook](https://colab.research.google.com/drive/1e0olXyLAFAVE3JDHutqskYNwQiHFVrFm?usp=sharing)
+on Google Colab which allows you to run Silk in the cloud, without
+needing to have specialised hardware or install anything on your machine.
+Google Colab offers a small amount of free credit (a few hours per day
+on a Tesla T4 GPU).
+
+Alternatively, if you have your own NVIDIA GPU, then you can run Silk
+locally on your own computer. The dependencies are a CUDA compiler
+(`nvcc` is recommended, but you can also use Clang), CMake, and git.
+You can download Silk by running the following in a terminal (if on
+Windows, you'll need to use WSL2 Ubuntu):
+
+    git clone https://gitlab.com/apgoucher/silk.git
+
+Then enter the directory that has just been created:
+
+    cd silk
+
+and compile the code, tuned for whatever GPU architecture you have:
+
+    ./recompile.sh
+
+Then you can run Silk as follows:
+
+    build/src/silk examples/2c3.rle 10 10 10
+
+The first argument, `examples/2c3.rle`, is a LifeHistory RLE file
+specifying a search problem. This can be edited using a program such
+as Golly, and the different cell colours have different meanings:
+
+* State 0: off in stable background
+* State 1: off in stable background + on in active perturbation
+* State 2: unknown in stable background
+* State 3: on in stable background
+* State 4: like state 0, but must stay off forever
+* State 5: like state 3, but must stay on forever
+* State 6: at least one of these cells must be on in stable background
+
+The next three command-line arguments are the maximum width, height,
+and cell count of the **active region** (described in the next section).
+
+Silk has a small number of other options that you can control; they
+are documented by running the command:
+
+    build/src/silk --help
+
 General idea
 ------------
 
