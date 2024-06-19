@@ -6,6 +6,14 @@ Silk: a CUDA drifter searcher
 underlying algorithm, modulo a few tweaks, to CUDA in order to benefit
 from the much greater parallelism present on GPUs.
 
+- [Quick start](#quick-start)
+- Technical overview:
+    - [General idea](#general-idea)
+    - [Tree search methodology](#tree-search-methodology)
+    - [Problem representation](#problem-representation)
+
+![Silk logo](./docs/silk.jpg)
+
 Quick start
 -----------
 
@@ -39,13 +47,13 @@ The first argument, `examples/2c3.rle`, is a LifeHistory RLE file
 specifying a search problem. This can be edited using a program such
 as Golly, and the different cell colours have different meanings:
 
-* State 0 (black): off in stable background
-* State 1 (green): off in stable background + on in active perturbation
-* State 2 (blue): unknown in stable background
-* State 3 (white): on in stable background
-* State 4 (red): like state 0, but must stay off forever
-* State 5 (yellow): like state 3, but must stay on forever
-* State 6 (grey): at least one of these cells must be on in stable background
+- State 0 (black): off in stable background
+- State 1 (green): off in stable background + on in active perturbation
+- State 2 (blue): unknown in stable background
+- State 3 (white): on in stable background
+- State 4 (red): like state 0, but must stay off forever
+- State 5 (yellow): like state 3, but must stay on forever
+- State 6 (grey): at least one of these cells must be on in stable background
 
 ![example input](./docs/example_input.png)
 
@@ -100,8 +108,6 @@ The main tree search runs on the GPU whilst the SAT solvers run on
 CPU threads asynchronously, so the completion of stators does not slow
 down the main search.
 
-![Silk logo](./docs/silk.jpg)
-
 Tree search methodology
 -----------------------
 
@@ -144,14 +150,14 @@ Problem representation
 In our stable background $`S`$, each cell must be of one of eight
 different 'types':
 
- - dead with 0 live neighbours;
- - dead with 1 live neighbour;
- - dead with 2 live neighbours;
- - live with 2 live neighbours;
- - live with 3 live neighbours;
- - dead with 4 live neighbours;
- - dead with 5 live neighbours;
- - dead with 6 live neighbours;
+- dead with 0 live neighbours;
+- dead with 1 live neighbour;
+- dead with 2 live neighbours;
+- live with 2 live neighbours;
+- live with 3 live neighbours;
+- dead with 4 live neighbours;
+- dead with 5 live neighbours;
+- dead with 6 live neighbours;
 
 which are abbreviated to d0, d1, d2, l2, l3, d4, d5, and d6.
 
@@ -182,15 +188,15 @@ The vast majority of the runtime is spent in a GPU kernel, entitled
 $`B`$ threadblocks, each containing a single warp (32 threads). At
 a high level, each threadblock of the kernel proceeds as follows:
 
- - load an open problem from global memory into registers;
- - perform as many logical inferences about $`S`$ as possible,
+- load an open problem from global memory into registers;
+- perform as many logical inferences about $`S`$ as possible,
    advancing the active perturbation $`P`$ whenever we have
    sufficient information to do so;
- - if we enter a cycle or reach a contradiction, terminate;
- - otherwise, i.e. we do not have sufficient information to compute
+- if we enter a cycle or reach a contradiction, terminate;
+- otherwise, i.e. we do not have sufficient information to compute
    the next generation of $`P`$, select a cell of $`P`$ whose next
    state is unknown and make a binary decision based on that cell;
- - enqueue the two resulting subproblems into the ring buffer.
+- enqueue the two resulting subproblems into the ring buffer.
 
 After the kernel completes, these subproblems are moved from the
 ring buffer to the heap, and then we retrieve the next batch of
@@ -227,11 +233,11 @@ the active perturbation together with the stable state $`S`$
 restricted to those cells. In other words, we need to know for every
 cell which of the three cases applies:
 
- - **stable**: the cell is equal to the background, so is not part
+- **stable**: the cell is equal to the background, so is not part
    of the active perturbation $`P`$.
- - **high**: the cell is live in the current generation and dead
+- **high**: the cell is live in the current generation and dead
    in the background state.
- - **low**: the cell is dead in the current generation and live
+- **low**: the cell is dead in the current generation and live
    in the background state.
 
 If we cannot advance because this information is not known for every
