@@ -234,7 +234,7 @@ void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue
 
         // attempt to stabilise:
         std::vector<uint64_t> res;
-        for (int r = 4; r < 9; r++) {
+        for (int r = 4; r <= 12; r++) {
             res = kc::complete_still_life(tmp, r, true);
             if (res.size() > 0) { break; }
         }
