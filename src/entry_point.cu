@@ -3,6 +3,41 @@
 #include <thread>
 
 
+__global__ void srb_to_prb(const uint4* srb, uint4* prb, const uint32_t* freenodes, const uint64_t* global_counters, uint32_t prb_size) {
+
+    constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
+
+    uint64_t pair_idx = (global_counters[COUNTER_READING_HEAD] >> 1) + blockIdx.x;
+    uint32_t node_loc = freenodes[pair_idx & ((prb_size >> 1) - 1)];
+
+    const uint32_t* reading_location = ((const uint32_t*) (srb + blockIdx.x * uint4s_per_pp));
+    uint32_t* writing_location = ((uint32_t*) (prb + node_loc * uint4s_per_pp));
+
+    #pragma unroll
+    for (int i = 0; i < 5; i++) {
+        writing_location[224 * i + threadIdx.x] = reading_location[224 * i + threadIdx.x];
+    }
+}
+
+
+__global__ void prb_to_srb(const uint4* prb, uint4* srb, const uint32_t* freenodes, const uint64_t* global_counters, uint32_t prb_size, uint64_t multiplier, uint64_t offset, uint64_t modulus) {
+
+    constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
+
+    uint64_t mangled_idx = (multiplier * blockIdx.x + offset) % modulus;
+    uint64_t pair_idx = (global_counters[COUNTER_READING_HEAD] >> 1) + mangled_idx;
+    uint32_t node_loc = freenodes[pair_idx & ((prb_size >> 1) - 1)];
+
+    const uint32_t* reading_location = ((const uint32_t*) (prb + node_loc * uint4s_per_pp));
+    uint32_t* writing_location = ((uint32_t*) (srb + blockIdx.x * uint4s_per_pp));
+
+    #pragma unroll
+    for (int i = 0; i < 5; i++) {
+        writing_location[224 * i + threadIdx.x] = reading_location[224 * i + threadIdx.x];
+    }
+}
+
+
 /**
  * Rather trivial kernel that produces training data from the
  * output of computecellorbackup().
@@ -164,18 +199,22 @@ struct SilkGPU {
         }
     }
 
-    void inject_problem(std::vector<uint32_t> problem, std::vector<uint32_t> stator) {
+    void set_stator(std::vector<uint32_t> stator) {
+        cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
+    }
 
-        int num_problems = (4 * problem.size()) / PROBLEM_PAIR_BYTES;
+    void inject_problems(std::vector<uint32_t> problem) {
 
-        host_counters[COUNTER_WRITING_HEAD] = 2 * num_problems;
-        host_counters[COUNTER_MIDDLE_HEAD] = 2 * num_problems;
+        int num_problem_pairs = (4 * problem.size()) / PROBLEM_PAIR_BYTES;
+
+        host_counters[COUNTER_WRITING_HEAD] = host_counters[COUNTER_READING_HEAD] + 2 * num_problem_pairs;
+        host_counters[COUNTER_MIDDLE_HEAD] = host_counters[COUNTER_WRITING_HEAD];
         drb_hwm = host_counters[COUNTER_MIDDLE_HEAD];
 
         cudaMemcpy(global_counters, host_counters, 512, cudaMemcpyHostToDevice);
-        cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
-        if (num_problems > 0) {
-            cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
+        if (num_problem_pairs > 0) {
+            cudaMemcpy(srb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problem_pairs, cudaMemcpyHostToDevice);
+            srb_to_prb<<<num_problem_pairs, 224>>>(srb, prb, freenodes, global_counters, prb_size);
         }
     }
 
@@ -360,7 +399,8 @@ void gpu_thread_loop(SolutionQueue *status_queue, int stream_id, int device_id, 
 
     SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
 
-    silk.inject_problem(problem, stator);
+    silk.set_stator(stator);
+    silk.inject_problems(problem);
 
     run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, min_stable);
 
