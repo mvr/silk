@@ -14,6 +14,8 @@
 #define MESSAGE_INIT 3
 #define MESSAGE_DATA 4
 #define MESSAGE_SANKEY 5
+#define MESSAGE_PROBLEMS 6
+#define MESSAGE_COMPLETED 7
 
 std::string format_string(const char* format, ...) {
     // Start with variadic arguments
@@ -36,6 +38,11 @@ std::string format_string(const char* format, ...) {
     return std::string(buffer.data());
 }
 
+struct ProblemMessage {
+    uint64_t message_type;
+    std::vector<uint32_t> problem_data;
+};
+
 struct PrintMessage {
     uint64_t message_type;
     uint64_t return_code;
@@ -53,6 +60,7 @@ struct SolutionMessage {
     std::vector<uint64_t> nnue_data;
 };
 
+typedef moodycamel::BlockingConcurrentQueue<ProblemMessage> ProblemQueue;
 typedef moodycamel::BlockingConcurrentQueue<PrintMessage> PrintQueue;
 typedef moodycamel::BlockingConcurrentQueue<SolutionMessage> SolutionQueue;
 

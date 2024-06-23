@@ -383,15 +383,13 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
     }
 }
 
-void gpu_thread_loop(SolutionQueue *status_queue, int stream_id, int device_id, size_t prb_capacity, const float4* nnue, bool make_data,
-    int active_width, int active_height, int active_pop, const kc::ProblemHolder *ph, int min_report_period, int min_stable) {
+void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, SolutionQueue *status_queue,
+    int stream_id, int device_id, size_t prb_capacity, const float4* nnue, bool make_data, int active_width,
+    int active_height, int active_pop, const kc::ProblemHolder *ph, int min_report_period, int min_stable) {
 
     cudaSetDevice(device_id);
 
-    auto problem = ph->swizzle_problem();
     auto stator = ph->swizzle_stator();
-
-    if (stream_id != 0) { problem.clear(); }
 
     // these probably don't need changing:
     size_t srb_capacity = 16384;
@@ -400,9 +398,22 @@ void gpu_thread_loop(SolutionQueue *status_queue, int stream_id, int device_id, 
     SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
 
     silk.set_stator(stator);
-    silk.inject_problems(problem);
 
-    run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, min_stable);
+    ProblemMessage item;
+
+    while (true) {
+        problem_queue->wait_dequeue(item);
+        if (item.message_type == MESSAGE_KILL_THREAD) { break; }
+        silk.inject_problems(item.problem_data);
+        run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, min_stable);
+
+        {
+            // tell master thread that we've finished a batch:
+            ProblemMessage pm;
+            pm.message_type = MESSAGE_COMPLETED;
+            master_queue->enqueue(pm);
+        }
+    }
 
     {
         // signal to the status queue that we've finished:
@@ -497,6 +508,8 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     SolutionQueue status_queue;
     SolutionQueue solution_queue;
+    ProblemQueue problem_queue;
+    ProblemQueue master_queue;
     PrintQueue print_queue;
 
     std::vector<std::thread> gpu_threads;
@@ -522,7 +535,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
                 int device_id = ((uint32_t) x.first);
                 const float4* nnue = x.second;
                 std::cerr << "    -- creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
-                gpu_threads.emplace_back(gpu_thread_loop, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
+                gpu_threads.emplace_back(gpu_thread_loop, &problem_queue, &master_queue, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
                                         active_width, active_height, active_pop, &ph, min_report_period, min_stable);
             }
         }
@@ -536,8 +549,34 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         cadical_threads.emplace_back(solution_thread_loop, &solution_queue, &print_queue);
     }
 
+    // ***** INJECT PROBLEM *****
+
+    {
+        ProblemMessage pm;
+        pm.message_type = MESSAGE_PROBLEMS;
+        pm.problem_data = ph.swizzle_problem();
+        problem_queue.enqueue(pm);
+    }
+    uint64_t batches_in_flight = 1;
+
+    // ***** AWAIT COMPLETION *****
+
+    while (batches_in_flight) {
+        ProblemMessage item;
+        master_queue.wait_dequeue(item);
+
+        if (item.message_type == MESSAGE_COMPLETED) {
+            batches_in_flight -= 1;
+        } else if (item.message_type == MESSAGE_PROBLEMS) {
+            ProblemMessage pm = item;
+            problem_queue.enqueue(pm);
+            batches_in_flight += 1;
+        }
+    }
+
     // ***** TEAR DOWN THREADS *****
 
+    for (int i = 0; i < num_streams; i++) { ProblemMessage pm; pm.message_type = MESSAGE_KILL_THREAD; problem_queue.enqueue(pm); }
     for (int i = 0; i < num_streams; i++) { gpu_threads[i].join(); }
 
     for (auto&& x : device_infos) {
