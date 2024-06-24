@@ -178,7 +178,7 @@ struct SilkGPU {
 
         cudaMemcpy(global_counters, host_counters, 512, cudaMemcpyHostToDevice);
         cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
-        cudaMemcpy(ctx+512, &(exempt[0]), 512, cudaMemcpyHostToDevice);
+        cudaMemcpy(((char*)ctx)+512, &(exempt[0]), 512, cudaMemcpyHostToDevice);
         cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
