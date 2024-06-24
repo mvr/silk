@@ -156,7 +156,7 @@ struct ProblemHolder {
     std::vector<uint64_t> perturbation;
     std::vector<uint64_t> constraints;
 
-    ProblemHolder(const std::string &filename) : num_subproblems(0), stator(64) {
+    ProblemHolder(const std::string &filename) : num_subproblems(0), stator(64), exempt(64) {
 
         auto cells = rle2cells(readFileIntoString(filename));
 
