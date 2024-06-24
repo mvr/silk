@@ -101,7 +101,7 @@ struct SilkGPU {
         uint64_t hrb_capacity = prb_capacity >> 4;
         if (hrb_capacity < 8192) { hrb_capacity = 8192; }
 
-        cudaMalloc((void**) &ctx, 512);
+        cudaMalloc((void**) &ctx, 512 * 2);
         cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
         cudaMalloc((void**) &srb, 4096 * srb_capacity);
         cudaMalloc((void**) &smd, 4 * srb_capacity);
@@ -135,7 +135,7 @@ struct SilkGPU {
 
         cudaMemcpy(freenodes, host_freenodes, 2 * prb_capacity, cudaMemcpyHostToDevice);
 
-        cudaMemset(ctx, 0, 512);
+        cudaMemset(ctx, 0, 512 * 2);
         cudaMemset(nnue, 0, NNUE_BYTES);
 
         max_width = active_width;
@@ -168,7 +168,7 @@ struct SilkGPU {
         }
     }
 
-    void inject_problem(std::vector<uint32_t> problem, std::vector<uint32_t> stator) {
+    void inject_problem(std::vector<uint32_t> problem, std::vector<uint32_t> stator, std::vector<uint32_t> exempt) {
 
         int num_problems = (4 * problem.size()) / PROBLEM_PAIR_BYTES;
 
@@ -178,6 +178,7 @@ struct SilkGPU {
 
         cudaMemcpy(global_counters, host_counters, 512, cudaMemcpyHostToDevice);
         cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
+        cudaMemcpy(ctx+512, &(exempt[0]), 512, cudaMemcpyHostToDevice);
         cudaMemcpy(prb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problems, cudaMemcpyHostToDevice);
     }
 
@@ -371,6 +372,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     auto problem = ph.swizzle_problem();
     auto stator = ph.swizzle_stator();
+    auto exempt = ph.swizzle_exempt();
 
     // ***** CHECK CUDA IS WORKING CORRECTLY *****
 
@@ -422,7 +424,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         cudaFreeHost(nnue_h);
     }
 
-    silk.inject_problem(problem, stator);
+    silk.inject_problem(problem, stator, exempt);
 
     // ***** ESTABLISH COMMUNICATIONS *****
 

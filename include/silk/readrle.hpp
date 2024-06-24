@@ -6,6 +6,7 @@
 #include <string>
 #include <iterator>
 #include <vector>
+#include <bit>
 
 namespace kc {
 
@@ -151,6 +152,7 @@ struct ProblemHolder {
 
     int num_subproblems;
     std::vector<uint64_t> stator;
+    std::vector<uint64_t> exempt;
     std::vector<uint64_t> perturbation;
     std::vector<uint64_t> constraints;
 
@@ -164,6 +166,18 @@ struct ProblemHolder {
                 if ((c == 4) || (c == 5)) { stator[y] |= (1ull << x); }
             }
         }
+
+        for (int y = 0; y < 64; y++) {
+            for (int x = 0; x < 64; x++) {
+                int c = cells[y * 64 + x];
+                if (c == 3) {
+                  exempt[(y+63) % 64] |= std::rotl(0b111ULL, x-1);
+                  exempt[y          ] |= std::rotl(0b111ULL, x-1);
+                  exempt[(y+1)  % 64] |= std::rotl(0b111ULL, x-1);
+                }
+            }
+        }
+
 
         cells = expand_cells(cells);
 
@@ -197,16 +211,19 @@ struct ProblemHolder {
         return complete_still_life(&(constraints[0]), 4, true);
     }
 
-    std::vector<uint32_t> swizzle_stator() {
+    static std::vector<uint32_t> swizzle_field(std::vector<uint64_t> &field) {
         std::vector<uint32_t> res(128);
         for (int y = 0; y < 32; y++) {
-            res[4 * y]     = stator[y];
-            res[4 * y + 1] = stator[y] >> 32;
-            res[4 * y + 2] = stator[y + 32];
-            res[4 * y + 3] = stator[y + 32] >> 32;
+            res[4 * y]     = field[y];
+            res[4 * y + 1] = field[y] >> 32;
+            res[4 * y + 2] = field[y + 32];
+            res[4 * y + 3] = field[y + 32] >> 32;
         }
         return res;
     }
+
+    std::vector<uint32_t> swizzle_stator() { return swizzle_field(stator); }
+    std::vector<uint32_t> swizzle_exempt() { return swizzle_field(exempt); }
 
     std::vector<uint32_t> swizzle_problem() {
         std::vector<uint32_t> res(1120 * num_subproblems);

@@ -6,7 +6,7 @@ namespace kc {
 template<bool CollectMetrics>
 _DI_ bool run_rollout(
     uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
-    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens, uint32_t* metrics = nullptr, int max_rounds = 32768
+    uint32_t perturbation, uint32_t stator, uint32_t exempt, int max_width, int max_height, int max_pop, int gens, uint32_t* metrics = nullptr, int max_rounds = 32768
 ) {
 
     bool improved = true;
@@ -33,7 +33,7 @@ _DI_ bool run_rollout(
         // run rollout:
         for (int i = 0; i < gens; i++) {
             bump_counter<CollectMetrics>(metrics, METRIC_ADVANCE);
-            improved = kc::inplace_advance_unknown<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop);
+            improved = kc::inplace_advance_unknown<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, exempt, max_width, max_height, max_pop);
             bool contradiction = hh::ballot_32(not_low & not_high & not_stable);
             if (contradiction) { return true; }
             if (improved) { break; }
@@ -49,10 +49,10 @@ template<bool CopyToSmem>
 _DI_ uint32_t get_branching_cells(
     uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
     uint32_t &not_low, uint32_t &not_high, uint32_t &not_stable,
-    uint32_t stator, int max_width = 28, int max_height = 28, uint32_t max_pop = 784, uint32_t* smem = nullptr
+    uint32_t stator, uint32_t exempt, int max_width = 28, int max_height = 28, uint32_t max_pop = 784, uint32_t* smem = nullptr
 ) {
 
-    kc::inplace_advance_unknown<CopyToSmem>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop, smem);
+    kc::inplace_advance_unknown<CopyToSmem>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, exempt, max_width, max_height, max_pop, smem);
 
     uint32_t ambiguous = apply_min3(not_low, not_high, not_stable);
 
@@ -82,7 +82,7 @@ _DI_ uint32_t get_branching_cells(
 template<bool CollectMetrics>
 _DI_ bool branched_rollout(
     uint32_t *smem, uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
-    uint32_t perturbation, uint32_t stator, int max_width, int max_height, int max_pop, int gens, uint32_t *metrics = nullptr, int max_rounds = 32768
+    uint32_t perturbation, uint32_t stator, uint32_t exempt, int max_width, int max_height, int max_pop, int gens, uint32_t *metrics = nullptr, int max_rounds = 32768
 ) {
 
     bump_counter<CollectMetrics>(metrics, METRIC_BRANCHING);
@@ -98,14 +98,14 @@ _DI_ bool branched_rollout(
         uint32_t not_high = (~perturbation) | forced_live;
         uint32_t not_stable = perturbation;
 
-        uint32_t mask = get_branching_cells<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, max_width, max_height, max_pop);
+        uint32_t mask = get_branching_cells<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, exempt max_width, max_height, max_pop);
 
         mask &= ~cumulative_mask;
         if (hh::ballot_32(mask != 0) == 0) { return false; }
         cumulative_mask |= mask;
 
         bool contradiction = apply_branched<false>([&](uint32_t &bd0, uint32_t &bd1, uint32_t &bd2, uint32_t &bl2, uint32_t &bl3, uint32_t &bd4, uint32_t &bd5, uint32_t &bd6) __attribute__((always_inline)) {
-            return run_rollout<CollectMetrics>(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6, perturbation, stator, max_width, max_height, max_pop, gens, metrics, max_rounds);
+            return run_rollout<CollectMetrics>(bd0, bd1, bd2, bl2, bl3, bd4, bd5, bd6, perturbation, stator, exempt, max_width, max_height, max_pop, gens, metrics, max_rounds);
         }, mask, smem, ad0, ad1, ad2, al2, al3, ad4, ad5, ad6);
 
         if (contradiction) { return true; }

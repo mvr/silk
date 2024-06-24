@@ -41,7 +41,7 @@ def main():
 _DI_ bool inplace_advance_unknown(
         %s,
         uint32_t &not_low, uint32_t &not_high, uint32_t &not_stable,
-        uint32_t stator, int max_width = 28, int max_height = 28, uint32_t max_pop = 784, uint32_t* smem = nullptr
+        uint32_t stator, uint32_t exempt, int max_width = 28, int max_height = 28, uint32_t max_pop = 784, uint32_t* smem = nullptr
     ) {
 
     // obtain lower and upper bounds in binary:
@@ -81,7 +81,7 @@ _DI_ bool inplace_advance_unknown(
         src += emit_case(state)
 
     src += '''
-    uint32_t forced_stable = kc::get_forced_stable(gnot_stable, ad0, stator, max_width, max_height, max_pop);
+    uint32_t forced_stable = kc::get_forced_stable(gnot_stable, ad0, stator, exempt, max_width, max_height, max_pop);
     gnot_low |= forced_stable;
     gnot_high |= forced_stable;
     uint32_t improvements = 0;
