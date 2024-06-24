@@ -100,7 +100,7 @@ _DI_ bool inplace_advance_unknown(
         gnot_stable &= fl_next;
     }
 
-    uint32_t forced_stable = kc::get_forced_stable(gnot_stable, ad0, stator, exempt55, max_width, max_height, max_pop);
+    uint32_t forced_stable = kc::get_forced_stable(gnot_stable, ad0, stator, exempt, max_width, max_height, max_pop);
     gnot_low |= forced_stable;
     gnot_high |= forced_stable;
     uint32_t improvements = 0;

@@ -98,7 +98,7 @@ _DI_ bool branched_rollout(
         uint32_t not_high = (~perturbation) | forced_live;
         uint32_t not_stable = perturbation;
 
-        uint32_t mask = get_branching_cells<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, exempt max_width, max_height, max_pop);
+        uint32_t mask = get_branching_cells<false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, not_low, not_high, not_stable, stator, exempt, max_width, max_height, max_pop);
 
         mask &= ~cumulative_mask;
         if (hh::ballot_32(mask != 0) == 0) { return false; }

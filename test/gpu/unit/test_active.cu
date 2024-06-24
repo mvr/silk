@@ -6,7 +6,7 @@ __global__ void active_bounds_kernel(uint32_t *ptr, int w, int h, int p) {
 
     uint32_t border = kc::get_border();
     uint32_t not_stable = ptr[threadIdx.x];
-    uint32_t forced_stable = kc::get_forced_stable(not_stable, 0xffffffffu, border, w, h, p);
+    uint32_t forced_stable = kc::get_forced_stable(not_stable, 0xffffffffu, border, 0, w, h, p);
     ptr[threadIdx.x] = forced_stable;
 
 }

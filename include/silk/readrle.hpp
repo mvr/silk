@@ -171,9 +171,10 @@ struct ProblemHolder {
             for (int x = 0; x < 64; x++) {
                 int c = cells[y * 64 + x];
                 if (c == 3) {
-                  exempt[(y+63) % 64] |= std::rotl(0b111ULL, x-1);
-                  exempt[y          ] |= std::rotl(0b111ULL, x-1);
-                  exempt[(y+1)  % 64] |= std::rotl(0b111ULL, x-1);
+                  // mvrnote: there must be a less dumb way to do this
+                  exempt[(y+63) % 64] |= hh::rotl64(0b111ULL, (x+63) % 64);
+                  exempt[y          ] |= hh::rotl64(0b111ULL, (x+63) % 64);
+                  exempt[(y+1)  % 64] |= hh::rotl64(0b111ULL, (x+63) % 64);
                 }
             }
         }
