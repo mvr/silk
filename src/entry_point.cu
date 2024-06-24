@@ -1,6 +1,7 @@
 #include "cqueue.hpp"
 #include <silk/perm.hpp>
 #include <thread>
+#include <atomic>
 
 
 __global__ void srb_to_prb(const uint4* srb, uint4* prb, const uint32_t* freenodes, const uint64_t* global_counters, uint32_t prb_size) {
@@ -24,7 +25,7 @@ __global__ void prb_to_srb(const uint4* prb, uint4* srb, const uint32_t* freenod
 
     constexpr uint64_t uint4s_per_pp = PROBLEM_PAIR_BYTES >> 4;
 
-    uint64_t mangled_idx = (multiplier * blockIdx.x + offset) % modulus;
+    uint64_t mangled_idx = (multiplier * (blockIdx.x + offset)) % modulus;
     uint64_t pair_idx = (global_counters[COUNTER_READING_HEAD] >> 1) + mangled_idx;
     uint32_t node_loc = freenodes[pair_idx & ((prb_size >> 1) - 1)];
 
@@ -124,6 +125,7 @@ struct SilkGPU {
     int rollout_gens;
 
     uint64_t drb_hwm;
+    uint64_t last_solution_count;
 
     uint64_t perturbation[64];
     bool has_data;
@@ -175,6 +177,7 @@ struct SilkGPU {
         max_pop = active_pop;
         rollout_gens = 6;
         drb_hwm = 0;
+        last_solution_count = 0;
     }
 
     ~SilkGPU() {
@@ -215,6 +218,25 @@ struct SilkGPU {
         if (num_problem_pairs > 0) {
             cudaMemcpy(srb, &(problem[0]), PROBLEM_PAIR_BYTES * num_problem_pairs, cudaMemcpyHostToDevice);
             srb_to_prb<<<num_problem_pairs, 224>>>(srb, prb, freenodes, global_counters, prb_size);
+        }
+    }
+
+    void split(uint64_t problem_pairs, uint64_t num_batches, ProblemQueue* master_queue) {
+
+        uint64_t multiplier = ((uint64_t) (((double) problem_pairs) * 0.38196601125)) | 1ull;
+        while (hh::binary_gcd(multiplier, problem_pairs) > 1) { multiplier += 2; }
+
+        for (uint64_t i = 0; i < num_batches; i++) {
+            uint64_t offset = (i * problem_pairs) / num_batches;
+            uint64_t offset2 = ((i+1) * problem_pairs) / num_batches;
+            uint64_t bsize = offset2 - offset;
+            prb_to_srb<<<bsize, 224>>>(prb, srb, freenodes, global_counters, prb_size, multiplier, offset, problem_pairs);
+            std::vector<uint32_t> problem((PROBLEM_PAIR_BYTES >> 2) * bsize);
+            cudaMemcpy(&(problem[0]), srb, PROBLEM_PAIR_BYTES * bsize, cudaMemcpyDeviceToHost);
+            ProblemMessage pm;
+            pm.message_type = MESSAGE_PROBLEMS;
+            pm.problem_data = problem;
+            master_queue->enqueue(pm);
         }
     }
 
@@ -325,10 +347,12 @@ struct SilkGPU {
     }
 };
 
-void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period, int min_stable) {
+void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period, int min_stable, std::atomic<int64_t> *approx_batches, ProblemQueue *master_queue) {
 
+    int elapsed_iters = 0;
     int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
-    uint64_t last_solution_count = 0;
+
+    approx_batches->fetch_add(-1);
 
     while (open_problems) {
         int problems = silk.host_counters[COUNTER_MIDDLE_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
@@ -354,15 +378,15 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
             status_queue->enqueue(sm);
         }
 
-        while (silk.host_counters[COUNTER_SOLUTION_HEAD] > last_solution_count) {
+        while (silk.host_counters[COUNTER_SOLUTION_HEAD] > silk.last_solution_count) {
             uint64_t next_solution_count = silk.host_counters[COUNTER_SOLUTION_HEAD];
-            if ((next_solution_count / silk.srb_size) > (last_solution_count / silk.srb_size)) {
-                next_solution_count = ((last_solution_count / silk.srb_size) + 1) * silk.srb_size;
+            if ((next_solution_count / silk.srb_size) > (silk.last_solution_count / silk.srb_size)) {
+                next_solution_count = ((silk.last_solution_count / silk.srb_size) + 1) * silk.srb_size;
             }
-            uint64_t solcount = next_solution_count - last_solution_count;
-            uint64_t starting_idx = last_solution_count % silk.srb_size;
+            uint64_t solcount = next_solution_count - silk.last_solution_count;
+            uint64_t starting_idx = silk.last_solution_count % silk.srb_size;
 
-            last_solution_count = next_solution_count;
+            silk.last_solution_count = next_solution_count;
 
             cudaMemcpy(silk.host_srb, silk.srb + 256 * starting_idx, 4096 * solcount, cudaMemcpyDeviceToHost);
             cudaMemcpy(silk.host_smd, silk.smd + starting_idx, 4 * solcount, cudaMemcpyDeviceToHost);
@@ -380,12 +404,30 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
                 status_queue->enqueue(sm);
             }
         }
+
+        elapsed_iters += 1;
+        if ((elapsed_iters >= 50) && (open_problems >= 16384) && (approx_batches->load() <= 20)) {
+            // we should dump the search progress into the queue:
+            int new_batches = (open_problems + 8191) >> 13;
+            if (new_batches < 4) { new_batches = 4; }
+            approx_batches->fetch_add(new_batches);
+
+            // empty heap:
+            enheap_then_deheap(silk.hrb, silk.global_counters, silk.heap, silk.hrb_size, -1, silk.freenodes, silk.prb_size);
+            cudaMemcpy(silk.host_counters, silk.global_counters, 512, cudaMemcpyDeviceToHost);
+
+            // make batches:
+            uint64_t problem_pairs = open_problems >> 1;
+            silk.split(problem_pairs, new_batches, master_queue);
+            break;
+        }
     }
 }
 
 void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, SolutionQueue *status_queue,
     int stream_id, int device_id, size_t prb_capacity, const float4* nnue, bool make_data, int active_width,
-    int active_height, int active_pop, const kc::ProblemHolder *ph, int min_report_period, int min_stable) {
+    int active_height, int active_pop, const kc::ProblemHolder *ph, int min_report_period, int min_stable,
+    std::atomic<int64_t> *approx_batches) {
 
     cudaSetDevice(device_id);
 
@@ -405,7 +447,7 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
         problem_queue->wait_dequeue(item);
         if (item.message_type == MESSAGE_KILL_THREAD) { break; }
         silk.inject_problems(item.problem_data);
-        run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, min_stable);
+        run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, min_stable, approx_batches, master_queue);
 
         {
             // tell master thread that we've finished a batch:
@@ -514,6 +556,8 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     std::vector<std::thread> gpu_threads;
 
+    std::atomic<int64_t> approx_batches = 1;
+
     std::cerr << "Info: creating " << num_streams << " streams..." << std::endl;
 
     for (auto&& x : device_infos) {
@@ -536,7 +580,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
                 const float4* nnue = x.second;
                 std::cerr << "    -- creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
                 gpu_threads.emplace_back(gpu_thread_loop, &problem_queue, &master_queue, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
-                                        active_width, active_height, active_pop, &ph, min_report_period, min_stable);
+                                        active_width, active_height, active_pop, &ph, min_report_period, min_stable, &approx_batches);
             }
         }
     }
@@ -551,6 +595,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     // ***** INJECT PROBLEM *****
 
+    std::cerr << "Info: all comms established; commencing search..." << std::endl;
     {
         ProblemMessage pm;
         pm.message_type = MESSAGE_PROBLEMS;
@@ -568,7 +613,9 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         if (item.message_type == MESSAGE_COMPLETED) {
             batches_in_flight -= 1;
         } else if (item.message_type == MESSAGE_PROBLEMS) {
-            ProblemMessage pm = item;
+            ProblemMessage pm;
+            pm.message_type = item.message_type;
+            pm.problem_data = item.problem_data;
             problem_queue.enqueue(pm);
             batches_in_flight += 1;
         }
