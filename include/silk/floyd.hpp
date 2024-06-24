@@ -157,6 +157,10 @@ _DI_ int floyd_cycle(
         }
     } // while (true)
 
+    if (generation > 0 && min_stable != 999999999 && hh::ballot_32(perturbation & ad0.x) == 0) {
+        generation = 1000000000;
+    }
+
     return generation;
 }
 
