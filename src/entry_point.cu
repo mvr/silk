@@ -354,11 +354,11 @@ void run_main_loop(SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* s
     }
 }
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int min_stable, std::string dataset_filename) {
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int min_stable, bool exempt_existing, std::string dataset_filename) {
 
     // ***** LOAD PROBLEM *****
 
-    kc::ProblemHolder ph(input_filename);
+    kc::ProblemHolder ph(input_filename, exempt_existing);
 
     int ppc = 0;
     for (int i = 0; i < 64; i++) { ppc += hh::popc64(ph.perturbation[i]); }

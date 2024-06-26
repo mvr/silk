@@ -156,7 +156,7 @@ struct ProblemHolder {
     std::vector<uint64_t> perturbation;
     std::vector<uint64_t> constraints;
 
-    ProblemHolder(const std::string &filename) : num_subproblems(0), stator(64), exempt(64) {
+    ProblemHolder(const std::string &filename, bool exempt_existing) : num_subproblems(0), stator(64), exempt(64) {
 
         auto cells = rle2cells(readFileIntoString(filename));
 
@@ -166,15 +166,16 @@ struct ProblemHolder {
                 if ((c == 4) || (c == 5)) { stator[y] |= (1ull << x); }
             }
         }
-
-        for (int y = 0; y < 64; y++) {
-            for (int x = 0; x < 64; x++) {
-                int c = cells[y * 64 + x];
-                if (c == 3) {
-                  // mvrnote: there must be a less dumb way to do this
-                  exempt[(y+63) % 64] |= hh::rotl64(0b111ULL, (x+63) % 64);
-                  exempt[y          ] |= hh::rotl64(0b111ULL, (x+63) % 64);
-                  exempt[(y+1)  % 64] |= hh::rotl64(0b111ULL, (x+63) % 64);
+        if(exempt_existing) {
+            for (int y = 0; y < 64; y++) {
+                for (int x = 0; x < 64; x++) {
+                    int c = cells[y * 64 + x];
+                    if (c == 3) {
+                      // mvrnote: there must be a less dumb way to do this
+                      exempt[(y+63) % 64] |= hh::rotl64(0b111ULL, (x+63) % 64);
+                      exempt[y          ] |= hh::rotl64(0b111ULL, (x+63) % 64);
+                      exempt[(y+1)  % 64] |= hh::rotl64(0b111ULL, (x+63) % 64);
+                    }
                 }
             }
         }

@@ -3,7 +3,7 @@
 
 TEST(RLE, Reader) {
 
-    kc::ProblemHolder ph("examples/2c3.rle");
+    kc::ProblemHolder ph("examples/2c3.rle", false);
 
     auto solution = ph.complete();
 
