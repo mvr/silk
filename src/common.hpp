@@ -25,7 +25,7 @@
 
 #define NNUE_BYTES 3826176
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int min_stable, bool exempt_existing, std::string dataset_filename);
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, std::string dataset_filename);
 
 void enheap_then_deheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size);
 
@@ -51,6 +51,7 @@ void launch_main_kernel(
     int max_width,
     int max_height,
     int max_pop,
+    int max_perturbed_time,
     int min_stable,
     int rollout_gens,
 

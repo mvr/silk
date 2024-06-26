@@ -26,6 +26,7 @@ int main(int argc, char* argv[]) {
     ("cadicals", "number of CaDiCaL threads to stabilise results", cxxopts::value<int>()->default_value("8"))
     ("p,period", "minimum period of oscillators to report", cxxopts::value<int>()->default_value("999999999"))
     ("d,dataset", "filename of dataset to output", cxxopts::value<std::string>()->default_value(""))
+    ("m,max-perturbed-time", "maximum time the catalyst can interact", cxxopts::value<int>()->default_value("999999999"))            
     ("s,min-stable", "minimum unclean catalyst stable time before report", cxxopts::value<int>()->default_value("999999999"))
     ("e,exempt-existing", "whether to ignore constraints on ZOI of input catalyst cells", cxxopts::value<bool>()->default_value("false"))      
 
@@ -54,6 +55,7 @@ int main(int argc, char* argv[]) {
     int num_cadical_threads = result["cadicals"].as<int>();
     int min_report_period = result["period"].as<int>();
     std::string dataset_filename = result["dataset"].as<std::string>();
+    int max_perturbed_time = result["max-perturbed-time"].as<int>();
     int min_stable = result["min-stable"].as<int>();
     bool exempt_existing = result["exempt-existing"].as<bool>();
 
@@ -68,6 +70,7 @@ int main(int argc, char* argv[]) {
         nnue_filename,
         num_cadical_threads,
         min_report_period,
+        max_perturbed_time,
         min_stable,
         exempt_existing,
         dataset_filename
