@@ -30,6 +30,10 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 void enheap_then_deheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size);
 
 void launch_main_kernel(
+    // specialisations:
+    bool HasStator,
+    bool HasExempt,
+
     int blocks_to_launch,
 
     // device-side pointers:

@@ -4,6 +4,7 @@
 /**
  * Main kernel that does the majority of the work.
  */
+template<bool HasStator, bool HasExempt>
 __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
         // device-side pointers:
@@ -91,10 +92,20 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         if (contrib & 128) { ad6.x |= this_cell; }
     }
 
-    uint4 stator = ctx[threadIdx.x];
-    kc::shift_torus_inplace(stator, -px, -py);
-    uint4 exempt = ctx[threadIdx.x + 32];
-    kc::shift_torus_inplace(exempt, -px, -py);
+    uint4 stator;
+    if constexpr (HasStator) {
+        stator = ctx[threadIdx.x];
+        kc::shift_torus_inplace(stator, -px, -py);
+    } else {
+        stator.x = 0; stator.y = 0; stator.z = 0; stator.w = 0;
+    }
+    uint4 exempt;
+    if constexpr (HasExempt) {
+        exempt = ctx[threadIdx.x + 32];
+        kc::shift_torus_inplace(exempt, -px, -py);
+    } else {
+        exempt.x = 0; exempt.y = 0; exempt.z = 0; exempt.w = 0;
+    }
 
     // ********** INITIALISE SHARED MEMORY **********
 
@@ -124,7 +135,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         if (contradiction) { return_code = -1; break; }
 
         // advance and perform cycle detection:
-        return_code = kc::floyd_cycle<true>(
+        return_code = kc::floyd_cycle<true, HasStator, HasExempt>(
             ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, exempt, perturbation, px, py,
             perturbed_time, restored_time, max_width, max_height, max_pop, max_perturbed_time, min_stable, metrics
         );
@@ -259,6 +270,10 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 }
 
 void launch_main_kernel(
+    // specialisations:
+    bool HasStator,
+    bool HasExempt,
+
     int blocks_to_launch,
 
     // device-side pointers:
@@ -293,11 +308,25 @@ void launch_main_kernel(
     // as that is what the kernel expects:
     uint32_t epsilon_threshold = ((uint32_t) (epsilon * 4194304.0));
 
+    #define KERNEL_ARGS ctx, prb, srb, smd, global_counters, nnue, \
+        freenodes, hrb, prb_size, srb_size, hrb_size, max_width, \
+        max_height, max_pop, max_perturbed_time, min_stable, \
+        rollout_gens, min_period, epsilon_threshold
+
     // run the kernel:
-    computecellorbackup<<<blocks_to_launch, 32>>>(
-        ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
-        prb_size, srb_size, hrb_size,
-        max_width, max_height, max_pop, max_perturbed_time, min_stable, rollout_gens,
-        min_period, epsilon_threshold
-    );
+    if (HasStator) {
+        if (HasExempt) {
+            computecellorbackup<true, true><<<blocks_to_launch, 32>>>(KERNEL_ARGS);
+        } else {
+            computecellorbackup<true, false><<<blocks_to_launch, 32>>>(KERNEL_ARGS);
+        }
+    } else {
+        if (HasExempt) {
+            computecellorbackup<false, true><<<blocks_to_launch, 32>>>(KERNEL_ARGS);
+        } else {
+            computecellorbackup<false, false><<<blocks_to_launch, 32>>>(KERNEL_ARGS);
+        }
+    }
+
+    #undef KERNEL_ARGS
 }

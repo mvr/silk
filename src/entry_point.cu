@@ -129,6 +129,8 @@ struct SilkGPU {
 
     uint64_t perturbation[64];
     bool has_data;
+    bool HasStator;
+    bool HasExempt;
 
     SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t drb_capacity,
             int active_width, int active_height, int active_pop) {
@@ -205,6 +207,9 @@ struct SilkGPU {
     void set_ctx(std::vector<uint32_t> stator, std::vector<uint32_t> exempt) {
         cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
         cudaMemcpy(ctx + 32, &(exempt[0]), 512, cudaMemcpyHostToDevice);
+
+        HasStator = false; for (auto&& x : stator) { if (x) { HasStator = true; } }
+        HasExempt = false; for (auto&& x : exempt) { if (x) { HasExempt = true; } }
     }
 
     void inject_problems(std::vector<uint32_t> problem) {
@@ -257,7 +262,7 @@ struct SilkGPU {
         for (int bidx = 0; bidx < batches; bidx++) {
 
             // run the kernel:
-            launch_main_kernel(batch_size,
+            launch_main_kernel(HasStator, HasExempt, batch_size,
                 ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
                 prb_size, srb_size, hrb_size,
                 max_width, max_height, max_pop, max_perturbed_time, min_stable, rollout_gens,
