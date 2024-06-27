@@ -226,7 +226,6 @@ struct ProblemHolder {
 
     std::vector<uint32_t> swizzle_stator() const { return swizzle_field(stator); }
     std::vector<uint32_t> swizzle_exempt() const { return swizzle_field(exempt); }
-
     std::vector<uint32_t> swizzle_problem() const {
         std::vector<uint32_t> res(1120 * num_subproblems);
 

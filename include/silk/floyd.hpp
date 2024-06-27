@@ -12,7 +12,7 @@ namespace kc {
  *  1: restablised into different still-life
  *  n: oscillator with period n (n >= 2)
  */
-template<bool CollectMetrics>
+template<bool CollectMetrics, bool HasStator, bool HasExempt>
 _DI_ int floyd_cycle(
         uint4 &ad0, uint4 &ad1, uint4 &ad2, uint4 &al2, uint4 &al3, uint4 &ad4, uint4 &ad5, uint4 &ad6, uint4 &stator, uint4 &exempt,
         uint32_t &perturbation, uint32_t &px, uint32_t &py, uint32_t &perturbed_time, uint32_t &restored_time, int max_width, int max_height, int max_pop, int max_perturbed_time, int min_stable, uint32_t* metrics = nullptr
@@ -92,8 +92,8 @@ _DI_ int floyd_cycle(
             shift_torus_inplace(ad4, -mx, -my);
             shift_torus_inplace(ad5, -mx, -my);
             shift_torus_inplace(ad6, -mx, -my);
-            shift_torus_inplace(stator, -mx, -my);
-            shift_torus_inplace(exempt, -mx, -my);
+            if constexpr (HasStator) { shift_torus_inplace(stator, -mx, -my); }
+            if constexpr (HasExempt) { shift_torus_inplace(exempt, -mx, -my); }
             shift_plane_inplace(perturbation, -mx, -my);
 
             px = (px + mx) & 63;
@@ -130,8 +130,8 @@ _DI_ int floyd_cycle(
             shift_torus_inplace(ad4, -mx, -my);
             shift_torus_inplace(ad5, -mx, -my);
             shift_torus_inplace(ad6, -mx, -my);
-            shift_torus_inplace(stator, -mx, -my);
-            shift_torus_inplace(exempt, -mx, -my);
+            if constexpr (HasStator) { shift_torus_inplace(stator, -mx, -my); }
+            if constexpr (HasExempt) { shift_torus_inplace(exempt, -mx, -my); }
 
             // advance tortoise:
             uint32_t forced_dead = al2.x & al3.x;
@@ -153,8 +153,8 @@ _DI_ int floyd_cycle(
             shift_torus_inplace(ad4, mx, my);
             shift_torus_inplace(ad5, mx, my);
             shift_torus_inplace(ad6, mx, my);
-            shift_torus_inplace(stator, mx, my);
-            shift_torus_inplace(exempt, mx, my);
+            if constexpr (HasStator) { shift_torus_inplace(stator, mx, my); }
+            if constexpr (HasExempt) { shift_torus_inplace(exempt, mx, my); }
 
             // recentre tortoise:
             mx = get_middle_horizontal(qerturbation);
