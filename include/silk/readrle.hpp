@@ -6,7 +6,6 @@
 #include <string>
 #include <iterator>
 #include <vector>
-#include <bit>
 
 namespace kc {
 

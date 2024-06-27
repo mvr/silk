@@ -30,9 +30,9 @@ int main(int argc, char* argv[]) {
     ("cadicals", "number of CaDiCaL threads to stabilise results", cxxopts::value<int>()->default_value(TOSTRING(NUM_PROCESSORS)))
     ("p,period", "minimum period of oscillators to report", cxxopts::value<int>()->default_value("999999999"))
     ("d,dataset", "filename of dataset to output", cxxopts::value<std::string>()->default_value(""))
-    ("m,max-perturbed-time", "maximum time the catalyst can interact", cxxopts::value<int>()->default_value("999999999"))            
+    ("m,max-perturbed-time", "maximum time the catalyst can interact", cxxopts::value<int>()->default_value("999999999"))
     ("s,min-stable", "minimum unclean catalyst stable time before report", cxxopts::value<int>()->default_value("999999999"))
-    ("e,exempt-existing", "whether to ignore constraints on ZOI of input catalyst cells", cxxopts::value<bool>()->default_value("false"))      
+    ("e,exempt-existing", "whether to ignore constraints on ZOI of input catalyst cells", cxxopts::value<bool>()->default_value("false"))
 
     // help
     ("h,help", "Print usage");

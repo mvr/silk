@@ -95,7 +95,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     kc::shift_torus_inplace(stator, -px, -py);
     uint4 exempt = ctx[threadIdx.x + 32];
     kc::shift_torus_inplace(exempt, -px, -py);
-    
+
     // ********** INITIALISE SHARED MEMORY **********
 
     __shared__ uint32_t smem[256];
