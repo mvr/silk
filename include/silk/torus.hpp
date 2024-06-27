@@ -131,11 +131,11 @@ _DI_ uint32_t get_border() {
  * that are known to be unstable, making use of the width, height,
  * and population bounds of the active region.
  */
-_DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, uint32_t stator, int max_width, int max_height, uint32_t max_pop) {
+_DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, uint32_t stator, uint32_t exempt, int max_width, int max_height, uint32_t max_pop) {
 
     // the active region consists of cells adjacent to the catalyst
     // that are not in the stable state:
-    uint32_t active = not_stable & ad0;
+    uint32_t active = not_stable & ad0 & ~exempt;
     uint32_t active_y = hh::ballot_32(active != 0);
     uint32_t active_p = hh::warp_add((uint32_t) hh::popc32(active));
     uint32_t active_x = hh::warp_or(active);
@@ -154,7 +154,7 @@ _DI_ uint32_t get_forced_stable(uint32_t not_stable, uint32_t ad0, uint32_t stat
     uint32_t inactive = inactive_x | inactive_y | inactive_p;
 
     uint32_t border = get_border();
-    return stator | border | (inactive & ad0);
+    return stator | border | (inactive & ad0 & ~exempt);
 }
 
 _DI_ uint32_t compute_next_cell(uint32_t mask, uint32_t p) {

@@ -92,7 +92,9 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     uint4 stator = ctx[threadIdx.x];
     kc::shift_torus_inplace(stator, -px, -py);
-
+    uint4 exempt = ctx[threadIdx.x + 32];
+    kc::shift_torus_inplace(exempt, -px, -py);
+    
     // ********** INITIALISE SHARED MEMORY **********
 
     __shared__ uint32_t smem[256];
@@ -115,14 +117,14 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
     while (return_code == -3) {
         // apply soft-branching and propagation:
         bool contradiction = kc::branched_rollout<true>(
-            smem, ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, perturbation, stator.x,
+            smem, ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, perturbation, stator.x, exempt.x,
             max_width, max_height, max_pop, rollout_gens, metrics, max_rounds
         );
         if (contradiction) { return_code = -1; break; }
 
         // advance and perform cycle detection:
         return_code = kc::floyd_cycle<true>(
-            ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, perturbation, px, py,
+            ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, exempt, perturbation, px, py,
             overall_generation, restored_time, max_width, max_height, max_pop, min_stable, metrics
         );
 
@@ -218,7 +220,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     float final_loss = kc::hard_branch(
         writing_location, perturbation, metadata_z, metadata_out,
-        ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, stator.x,
+        ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x, stator.x, exempt.x,
         max_width, max_height, max_pop, smem, epsilon_threshold,
         [&](uint32_t signature) __attribute__((always_inline)) {
             float loss = kc::evaluate_nnue(signature, nnue);

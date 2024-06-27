@@ -137,7 +137,7 @@ struct SilkGPU {
         uint64_t hrb_capacity = prb_capacity >> 4;
         if (hrb_capacity < 8192) { hrb_capacity = 8192; }
 
-        cudaMalloc((void**) &ctx, 512);
+        cudaMalloc((void**) &ctx, 512 * 2);
         cudaMalloc((void**) &prb, (PROBLEM_PAIR_BYTES >> 1) * prb_capacity);
         cudaMalloc((void**) &srb, 4096 * srb_capacity);
         cudaMalloc((void**) &smd, 4 * srb_capacity);
@@ -170,7 +170,7 @@ struct SilkGPU {
 
         cudaMemcpy(freenodes, host_freenodes, 2 * prb_capacity, cudaMemcpyHostToDevice);
 
-        cudaMemset(ctx, 0, 512);
+        cudaMemset(ctx, 0, 512 * 2);
 
         max_width = active_width;
         max_height = active_height;
@@ -204,6 +204,10 @@ struct SilkGPU {
 
     void set_stator(std::vector<uint32_t> stator) {
         cudaMemcpy(ctx, &(stator[0]), 512, cudaMemcpyHostToDevice);
+    }
+
+    void set_exempt(std::vector<uint32_t> exempt) {
+        cudaMemcpy(((char*)ctx)+512, &(exempt[0]), 512, cudaMemcpyHostToDevice);
     }
 
     void inject_problems(std::vector<uint32_t> problem) {
@@ -432,6 +436,7 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
     cudaSetDevice(device_id);
 
     auto stator = ph->swizzle_stator();
+    auto exempt = ph->swizzle_exempt();
 
     // these probably don't need changing:
     size_t srb_capacity = 16384;
@@ -440,6 +445,7 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
     SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
 
     silk.set_stator(stator);
+    silk.set_exempt(exempt);
 
     ProblemMessage item;
 

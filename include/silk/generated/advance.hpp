@@ -2,7 +2,7 @@ template<bool CopyToSmem>
 _DI_ bool inplace_advance_unknown(
         uint32_t &ad0, uint32_t &ad1, uint32_t &ad2, uint32_t &al2, uint32_t &al3, uint32_t &ad4, uint32_t &ad5, uint32_t &ad6,
         uint32_t &not_low, uint32_t &not_high, uint32_t &not_stable,
-        uint32_t stator, int max_width = 28, int max_height = 28, uint32_t max_pop = 784, uint32_t* smem = nullptr
+        uint32_t stator, uint32_t exempt, int max_width = 28, int max_height = 28, uint32_t max_pop = 784, uint32_t* smem = nullptr
     ) {
 
     // obtain lower and upper bounds in binary:
@@ -100,7 +100,7 @@ _DI_ bool inplace_advance_unknown(
         gnot_stable &= fl_next;
     }
 
-    uint32_t forced_stable = kc::get_forced_stable(gnot_stable, ad0, stator, max_width, max_height, max_pop);
+    uint32_t forced_stable = kc::get_forced_stable(gnot_stable, ad0, stator, exempt55, max_width, max_height, max_pop);
     gnot_low |= forced_stable;
     gnot_high |= forced_stable;
     uint32_t improvements = 0;

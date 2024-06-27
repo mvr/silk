@@ -17,9 +17,10 @@ __global__ void advance_kernel(uint32_t *x, int gens) {
     uint32_t not_high = x[offset + 288];
     uint32_t not_stable = x[offset + 320];
     uint32_t stator = x[offset + 352];
+    uint32_t exempt = 0;
 
     for (int i = 0; i < gens; i++) {
-        kc::inplace_advance_unknown<false>(d0, d1, d2, l2, l3, d4, d5, d6, not_low, not_high, not_stable, stator);
+        kc::inplace_advance_unknown<false>(d0, d1, d2, l2, l3, d4, d5, d6, not_low, not_high, not_stable, stator, exempt);
     }
 
     x[offset] = d0;
