@@ -242,7 +242,7 @@ struct SilkGPU {
         }
     }
 
-    void run_main_kernel(const float4* nnue, int blocks_to_launch, int open_problems, int min_period, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int batches = 4) {
+    void run_main_kernel(const float4* nnue, int blocks_to_launch, int open_problems, int min_period, int max_perturbed_time, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int batches = 4) {
 
         // if we are generating training data, then explore more
         // (75% random + 25% NNUE); otherwise, mostly follow the

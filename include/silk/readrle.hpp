@@ -212,7 +212,7 @@ struct ProblemHolder {
         return complete_still_life(&(constraints[0]), 4, true);
     }
 
-    static std::vector<uint32_t> swizzle_field(std::vector<uint64_t> &field) {
+    static std::vector<uint32_t> swizzle_field(const std::vector<uint64_t> &field) {
         std::vector<uint32_t> res(128);
         for (int y = 0; y < 32; y++) {
             res[4 * y]     = field[y];
