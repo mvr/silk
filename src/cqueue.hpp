@@ -179,7 +179,7 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
             uint64_t open_problems = totals[COUNTER_WRITING_HEAD] - totals[COUNTER_READING_HEAD];
             uint64_t high_period = totals[COUNTER_SOLUTION_HEAD] - totals[METRIC_FIZZLE] - totals[METRIC_CATALYSIS];
 
-            pm.contents += format_string("%14llu |%9llu (%5.2f%%) |%8llu |%8.3f |%8.3f |%8.3f |%8llu |%8llu |%8llu |",
+            pm.contents += format_string("%15llu |%9llu (%5.2f%%) |%8llu |%8.3f |%8.3f |%8.3f |%8llu |%8llu |%8llu |",
                 ((unsigned long long) totals[METRIC_KERNEL]),
                 ((unsigned long long) open_problems),
                 (100.0 * open_problems / totals[METRIC_PRB_SIZE]),
@@ -341,13 +341,13 @@ void print_thread_loop(int num_writers, PrintQueue* print_queue) {
         }
 
         if ((item.message_type == MESSAGE_STATUS) && (last_message_type != MESSAGE_STATUS)) {
-            std::cout << "+---------+-----------------------------------+---------+---------+-------------------+-----------------------------+" << std::endl;
-            std::cout << "| elapsed |           problems                | current | rollout | speed (Mprob/sec) |          solutions          |" << std::endl;
-            std::cout << "|  clock  +---------------+-------------------+  batch  |   per   +---------+---------+---------+---------+---------+" << std::endl;
-            std::cout << "|   time  |     solved    |  open (pct full)  |   size  | problem | current | overall | recover | oscill. | fizzles |" << std::endl;
-            std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+---------+" << std::endl;
+            std::cout << "+---------+------------------------------------+---------+---------+-------------------+-----------------------------+" << std::endl;
+            std::cout << "| elapsed |            problems                | current | rollout | speed (Mprob/sec) |          solutions          |" << std::endl;
+            std::cout << "|  clock  +----------------+-------------------+  batch  |   per   +---------+---------+---------+---------+---------+" << std::endl;
+            std::cout << "|   time  |     solved     |  open (pct full)  |   size  | problem | current | overall | recover | oscill. | fizzles |" << std::endl;
+            std::cout << "+---------+----------------+-------------------+---------+---------+---------+---------+---------+---------+---------+" << std::endl;
         } else if ((item.message_type != MESSAGE_STATUS) && (last_message_type == MESSAGE_STATUS)) {
-            std::cout << "+---------+---------------+-------------------+---------+---------+---------+---------+---------+---------+---------+" << std::endl;
+            std::cout << "+---------+----------------+-------------------+---------+---------+---------+---------+---------+---------+---------+" << std::endl;
             std::cout << std::endl;
         }
 
