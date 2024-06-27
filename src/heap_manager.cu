@@ -2,7 +2,7 @@
 #include <silk/heap.hpp>
 
 
-__global__ void __launch_bounds__(1024, 1) heapmanager(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size) {
+__global__ void __launch_bounds__(1024, 1) heapmanager(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size, bool advance_reading_head) {
 
     __shared__ uint64_t smem[2048];
 
@@ -30,7 +30,7 @@ __global__ void __launch_bounds__(1024, 1) heapmanager(const uint64_t* hrb, uint
 
     __syncthreads();
 
-    if (threadIdx.x == 0) {
+    if (advance_reading_head && (threadIdx.x == 0)) {
         global_counters[COUNTER_READING_HEAD] = middle_head;
     }
 
@@ -73,11 +73,13 @@ __global__ void __launch_bounds__(1024, 1) heapmanager(const uint64_t* hrb, uint
         global_counters[COUNTER_HEAP_ELEMENTS] = heap_elements;
         global_counters[COUNTER_MIDDLE_HEAD] = middle_head << 1;
     }
-
 }
 
+/**
+ * Set max_elements == -1 to fully empty the heap
+ */
 void enheap_then_deheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size) {
 
-    heapmanager<<<1, 1024>>>(hrb, global_counters, heap, hrb_size, max_elements, free_nodes, prb_size);
+    heapmanager<<<1, 1024>>>(hrb, global_counters, heap, hrb_size, max_elements & 0xfffffff, free_nodes, prb_size, (max_elements >= 0));
 
 }
