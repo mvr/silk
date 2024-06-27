@@ -2,6 +2,21 @@
 
 cd -- "$( dirname -- "${BASH_SOURCE[0]}" )"
 
+echo "Determining processor count..."
+
+if [ -z "$NPROCS" ]; then
+    NPROCS="$( getconf _NPROCESSORS_ONLN )"
+fi
+if [ -z "$NPROCS" ]; then
+    NPROCS="$( getconf NPROCESSORS_ONLN )"
+fi
+if [ -z "$NPROCS" ]; then
+    NPROCS=8
+    echo "Could not determine processor count; defaulting to $NPROCS"
+else
+    echo "Processor count: $NPROCS"
+fi
+
 echo "Checking dependencies..."
 
 if nvcc --version; then
@@ -33,8 +48,8 @@ git submodule update --init --recursive
 
 cd build
 
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j 8
+cmake -DNUM_PROCESSORS=$NPROCS -DCMAKE_BUILD_TYPE=Release ..
+make -j $NPROCS
 
 cd ..
 

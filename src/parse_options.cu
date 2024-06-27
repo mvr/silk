@@ -1,7 +1,11 @@
 #include "common.hpp"
 #include "../cxxopts/include/cxxopts.hpp"
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
 
 int main(int argc, char* argv[]) {
+
+    std::cerr << "Info: Silk was compiled on a system with " << NUM_PROCESSORS << " CPUs." << std::endl;
 
     if (argc < 1) {
         std::cerr << "Error: no command-line arguments were provided." << std::endl;
@@ -23,7 +27,7 @@ int main(int argc, char* argv[]) {
     ("max_active_cells", "maximum number of active cells", cxxopts::value<int>())
 
     // optional arguments
-    ("cadicals", "number of CaDiCaL threads to stabilise results", cxxopts::value<int>()->default_value("8"))
+    ("cadicals", "number of CaDiCaL threads to stabilise results", cxxopts::value<int>()->default_value(TOSTRING(NUM_PROCESSORS)))
     ("p,period", "minimum period of oscillators to report", cxxopts::value<int>()->default_value("999999999"))
     ("d,dataset", "filename of dataset to output", cxxopts::value<std::string>()->default_value(""))
     ("s,min-stable", "minimum unclean catalyst stable time before report", cxxopts::value<int>()->default_value("999999999"))
