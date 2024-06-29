@@ -6,7 +6,48 @@ Silk: a CUDA drifter searcher
 underlying algorithm, modulo a few tweaks, to CUDA in order to benefit
 from the much greater parallelism present on GPUs.
 
-- [Quick start](#quick-start)
+Silk's algorithm is similar to the
+[DPLL algorithm](https://en.wikipedia.org/wiki/DPLL_algorithm) in that
+it performs a tree search on unknown Boolean variables and applies unit
+propagation before branching. It differs from ordinary DPLL in a few
+aspects:
+
+- DPLL is a backtracking depth-first search whereas Silk uses a parallel
+  version of depth-first search based on a priority heap.
+- The unit propagation rules in Silk are implemented as bitsliced SIMD
+  logic, using the GPU's powerful `LOP3.LUT` instruction.
+- The encoding of the problem as clauses happens dynamically as we
+  advance the current perturbation (see [General idea](#general-idea)).
+- The heuristic for choosing the branching variable is provided by a
+  neural network that was trained on data outputted by Silk itself.
+
+Silk uses multiple levels of parallelism, from outermost to innermost:
+
+- Coordinating work items between different independent work streams
+  (of which there are two per physical GPU);
+- The batching described in [Tree search methodology](#tree-search-methodology)
+  where different warps traverse different nodes of the search tree;
+- The within-warp parallelism afforded by vectorisation (SIMD) and
+  bitslicing.
+
+This parallelism means that Silk is many times faster than Barrister,
+depending on the hardware; for example:
+
+| Hardware    | Speedup over Barrister |
+| :---------- | ---------------------: |
+| Quadro P600 |                    25x |
+| Tesla T4    |                   150x |
+| RTX 4090    |                  1250x |
+| 8x RTX 4090 |                 10000x |
+
+Silk will automatically use all available GPUs on a system; you can
+select a subset using the `CUDA_VISIBLE_DEVICES` environment variable.
+
+Contents
+--------
+
+- [Installing Silk](#installing-silk)
+- [Running Silk](#running-silk)
 - Technical overview:
     - [General idea](#general-idea)
     - [Tree search methodology](#tree-search-methodology)
@@ -14,8 +55,10 @@ from the much greater parallelism present on GPUs.
 
 ![Silk logo](./docs/silk.jpg)
 
-Quick start
------------
+Installing Silk
+---------------
+
+### Option I: running in the cloud:
 
 There is a [notebook](https://colab.research.google.com/drive/1e0olXyLAFAVE3JDHutqskYNwQiHFVrFm?usp=sharing)
 on Google Colab which allows you to run Silk in the cloud, without
@@ -23,9 +66,15 @@ needing to have specialised hardware or install anything on your machine.
 Google Colab offers a small amount of free credit (a few hours per day
 on a Tesla T4 GPU).
 
+### Option II: running on your computer:
+
 Alternatively, if you have your own NVIDIA GPU, then you can run Silk
 locally on your own computer. The dependencies are a CUDA compiler
 (`nvcc` is recommended, but you can also use Clang), CMake, and git.
+You can download nvcc [here](https://developer.nvidia.com/cuda-downloads)
+selecting Linux as your operating system (if you have Windows, then
+select the WSL-Ubuntu distribution).
+
 You can download Silk by running the following in a terminal (if on
 Windows, you'll need to use WSL2 Ubuntu):
 
@@ -39,13 +88,19 @@ and compile the code, tuned for whatever GPU architecture you have:
 
     ./recompile.sh
 
-Then you can run Silk as follows:
+Running Silk
+------------
+
+After compiling, you can run Silk as follows:
 
     build/src/silk examples/2c3.rle 10 10 10
 
-The first argument, `examples/2c3.rle`, is a LifeHistory RLE file
+The first argument, `examples/2c3.rle`, is a
+[LifeHistory](https://conwaylife.com/wiki/OCA:LifeHistory)
+[RLE](https://conwaylife.com/wiki/Run_Length_Encoded) file
 specifying a search problem. This can be edited using a program such
-as Golly, and the different cell colours have different meanings:
+as [Golly](https://golly.sourceforge.io/), and the different cell colours
+have different meanings:
 
 - State 0 (black): off in stable background
 - State 1 (green): off in stable background + on in active perturbation
@@ -159,7 +214,10 @@ different 'types':
 - dead with 5 live neighbours;
 - dead with 6 live neighbours;
 
-which are abbreviated to d0, d1, d2, l2, l3, d4, d5, and d6.
+which are abbreviated to d0, d1, d2, l2, l3, d4, d5, and d6. Any
+combination other than these eight types would cause either a dead
+cell to become alive (by having three live neighbours) or a live
+cell to become dead (from either under- or overpopulation).
 
 However, in any node of the search tree we only have partial
 information about $`S`$. We follow the design of Barrister by having
