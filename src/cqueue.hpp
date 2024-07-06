@@ -224,7 +224,7 @@ void status_thread_loop(int num_gpus, int num_cadical_threads, SolutionQueue* st
     }
 }
 
-void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue, bool raw_solutions) {
+void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue) {
 
     SolutionMessage item;
     while (true) {
@@ -232,33 +232,19 @@ void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue
         if (item.message_type == MESSAGE_KILL_THREAD) { break; }
 
         // unswizzle
-        uint64_t constraints[512];
+        uint64_t tmp[512];
         for (int z = 0; z < 8; z++) {
             for (int y = 0; y < 32; y++) {
-                constraints[64 * z + y]      = item.solution[128 * z + 4 * y    ] | (((uint64_t) item.solution[128 * z + 4 * y + 1]) << 32);
-                constraints[64 * z + y + 32] = item.solution[128 * z + 4 * y + 2] | (((uint64_t) item.solution[128 * z + 4 * y + 3]) << 32);
+                tmp[64 * z + y]      = item.solution[128 * z + 4 * y    ] | (((uint64_t) item.solution[128 * z + 4 * y + 1]) << 32);
+                tmp[64 * z + y + 32] = item.solution[128 * z + 4 * y + 2] | (((uint64_t) item.solution[128 * z + 4 * y + 3]) << 32);
             }
         }
 
-        std::vector<uint64_t> unk(64, 0);
+        // attempt to stabilise:
         std::vector<uint64_t> res;
-        if (raw_solutions) {
-            unk.resize(0);
-            int H = 8 * sizeof(int64_t);
-            for (int i = 0; i < H; i++) {
-                int64_t known_live = constraints[i] & constraints[i + H] & constraints[i + 2 * H];
-                int64_t known_dead = constraints[i + 3 * H] & constraints[i + 4 * H];
-                known_live &= constraints[i + 5 * H] & constraints[i + 6 * H] & constraints[i + 7 * H];
-                
-                res.push_back(known_live);
-                unk.push_back(~known_live & ~known_dead);
-            }
-        } else {
-            // attempt to stabilise:
-            for (int r = 4; r <= 12; r++) {
-                res = kc::complete_still_life(constraints, r, true);
-                if (res.size() > 0) { break; }
-            }
+        for (int r = 4; r <= 12; r++) {
+            res = kc::complete_still_life(tmp, r, true);
+            if (res.size() > 0) { break; }
         }
 
         if (res.size() > 0) {
@@ -279,13 +265,13 @@ void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue
             // prune:
             int miny = 0;
             int maxy = 63;
-            while ((item.perturbation[miny] == 0) && (unk[miny] == 0) && (res[miny] == 0)) { miny++; }
-            while ((item.perturbation[maxy] == 0) && (unk[maxy] == 0) && (res[maxy] == 0)) { maxy--; }
+            while ((item.perturbation[miny] == 0) && (res[miny] == 0)) { miny++; }
+            while ((item.perturbation[maxy] == 0) && (res[maxy] == 0)) { maxy--; }
 
             // stringify:
             for (int y = miny; y <= maxy; y++) {
                 for (int x = 0; x < 64; x++) {
-                    ss << (((item.perturbation[y] >> x) & 1) ? 'o' : (((unk[y] >> x) & 1) ? '?' : (((res[y] >> x) & 1) ? '*' : '.')));
+                    ss << (((item.perturbation[y] >> x) & 1) ? 'o' : (((res[y] >> x) & 1) ? '*' : '.'));
                 }
                 ss << std::endl;
             }

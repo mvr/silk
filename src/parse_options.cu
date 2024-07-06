@@ -33,7 +33,6 @@ int main(int argc, char* argv[]) {
     ("m,max-perturbed-time", "maximum time the catalyst can interact", cxxopts::value<int>()->default_value("999999999"))
     ("s,min-stable", "minimum unclean catalyst stable time before report", cxxopts::value<int>()->default_value("999999999"))
     ("e,exempt-existing", "whether to ignore constraints on ZOI of input catalyst cells", cxxopts::value<bool>()->default_value("false"))
-    ("r,raw-solutions", "don't stabilise solutions, print with unknown cells instead", cxxopts::value<bool>()->default_value("false"))
 
     // help
     ("h,help", "Print usage");
@@ -63,7 +62,6 @@ int main(int argc, char* argv[]) {
     int max_perturbed_time = result["max-perturbed-time"].as<int>();
     int min_stable = result["min-stable"].as<int>();
     bool exempt_existing = result["exempt-existing"].as<bool>();
-    bool raw_solutions = result["raw-solutions"].as<bool>();
 
     std::cerr << "Info: Silk invoked as " << silk_filename << std::endl;
 
@@ -79,7 +77,6 @@ int main(int argc, char* argv[]) {
         max_perturbed_time,
         min_stable,
         exempt_existing,
-        raw_solutions,
         dataset_filename
     );
 

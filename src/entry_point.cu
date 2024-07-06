@@ -473,7 +473,7 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
     }
 }
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, bool raw_solutions, std::string dataset_filename) {
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, std::string dataset_filename) {
 
     #define REPORT_EXIT(X) if (hh::reportCudaError(X)) { std::cerr << "Error: Silk aborting due to irrecoverable GPU error." << std::endl; return 1; }
 
@@ -598,7 +598,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     std::thread print_thread(print_thread_loop, num_cadical_threads + 1, &print_queue);
 
     for (int i = 0; i < num_cadical_threads; i++) {
-        cadical_threads.emplace_back(solution_thread_loop, &solution_queue, &print_queue, raw_solutions);
+        cadical_threads.emplace_back(solution_thread_loop, &solution_queue, &print_queue);
     }
 
     // ***** INJECT PROBLEM *****
