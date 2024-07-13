@@ -9,12 +9,6 @@ message(WARNING "NUM_PROCESSORS not defined, using default value 8")
 add_definitions(-DNUM_PROCESSORS=8)
 endif()
 
-if(CMAKE_VERSION VERSION_LESS "3.24.0")
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=native")
-else()
-set(CMAKE_CUDA_ARCHITECTURES "native")
-endif()
-
 add_compile_options( -O3 -g )
 add_link_options( -lpthread )
 
@@ -24,10 +18,32 @@ include(CheckLanguage)
 check_language(CUDA)
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 
-if(CMAKE_CUDA_COMPILER)
-enable_language(CUDA)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread --ptxas-options=-v -lineinfo -std=c++17")
+if(CMAKE_VERSION VERSION_LESS "3.24.0")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=native")
+else()
+set(CMAKE_CUDA_ARCHITECTURES "native")
 endif()
+
+# hack for using Clang as a CUDA compiler:
+if("${CMAKE_CUDA_COMPILER}" MATCHES "clang*")
+set(_CMAKE_CUDA_FLAGS_BEFORE ${CMAKE_CUDA_FLAGS})
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++98")
+enable_language(CUDA)
+set(CMAKE_CUDA_FLAGS ${_CMAKE_CUDA_FLAGS_BEFORE})
+unset(_CMAKE_CUDA_FLAGS_BEFORE)
+else()
+enable_language(CUDA)
+endif()
+
+# set actual CUDA flags:
+if("${CMAKE_CUDA_COMPILER}" MATCHES "clang*")
+# Clang does not support --default-stream per-thread --ptxas-options=-v
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__STRICT_ANSI__")
+else()
+# whereas NVIDIA does
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread --ptxas-options=-v")
+endif()
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo -std=c++17")
 
 add_subdirectory(cedilla)
 

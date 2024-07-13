@@ -42,13 +42,18 @@ fi
 
 mkdir build
 
-set -e
+set -ex
 
 git submodule update --init --recursive
 
 cd build
 
-cmake -DNUM_PROCESSORS=$NPROCS -DCMAKE_BUILD_TYPE=Release ..
+if [ -z "$CUDACXX" ]; then
+    cmake -DNUM_PROCESSORS=$NPROCS -DCMAKE_BUILD_TYPE=Release ..
+else
+    cmake -DCMAKE_CUDA_COMPILER="$CUDACXX" -DNUM_PROCESSORS=$NPROCS -DCMAKE_BUILD_TYPE=Release ..
+fi
+
 make -j $NPROCS
 
 cd ..
