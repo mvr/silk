@@ -37,8 +37,7 @@ endif()
 
 # set actual CUDA flags:
 if("${CMAKE_CUDA_COMPILER}" MATCHES "clang*")
-# Clang does not support --default-stream per-thread --ptxas-options=-v
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__STRICT_ANSI__")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__STRICT_ANSI__ -Xcuda-ptxas -v")
 else()
 # whereas NVIDIA does
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread --ptxas-options=-v")
