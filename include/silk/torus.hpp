@@ -55,10 +55,18 @@ _DI_ void shift_torus_inplace(uint4 &b, int i, int j) {
 }
 
 _DI_ void shift_plane_inplace(uint32_t &x, int i, int j) {
-    uint32_t y = 0;
-    uint32_t z = 0;
-    uint32_t w = 0;
-    shift_torus_inplace(x, y, z, w, i, j);
+    {
+        // vertical shift:
+        int src = ((threadIdx.x & 31) - j) & 63;
+        uint32_t x2 = hh::shuffle_32(x, src);
+        x2 = (src >= 32) ? 0 : x2;
+        // horizontal shift:
+        int ls = i & 63;
+        int rs = (-i) & 63;
+        x = 0;
+        if (ls < 32) { x |= (x2 << ls); }
+        if (rs < 32) { x |= (x2 >> rs); }
+    }
 }
 
 _DI_ uint4 shift_torus(uint4 a, int i, int j) {
