@@ -19,7 +19,11 @@ fi
 
 echo "Checking dependencies..."
 
-if nvcc --version; then
+if [ -z "$CUDACXX" ]; then
+    CUDACXX="nvcc"
+fi
+
+if "$CUDACXX" --version; then
     printf "\033[32;1m CUDA compiler detected \033[0m\n"
 else
     printf "\033[31;1mError:\033[0m you need to install nvcc in order to compile Silk\n"
@@ -48,11 +52,13 @@ git submodule update --init --recursive
 
 cd build
 
-if [ -z "$CUDACXX" ]; then
-    cmake -DNUM_PROCESSORS=$NPROCS -DCMAKE_BUILD_TYPE=Release ..
+if "$CUDACXX" --version | grep spectral; then
+    EXTRA_CMAKE_ARGS="-DUSE_SCALE=true -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON"
 else
-    cmake -DCMAKE_CUDA_COMPILER="$CUDACXX" -DNUM_PROCESSORS=$NPROCS -DCMAKE_BUILD_TYPE=Release ..
+    EXTRA_CMAKE_ARGS=" "
 fi
+
+cmake $EXTRA_CMAKE_ARGS -DCMAKE_CUDA_COMPILER="$CUDACXX" -DNUM_PROCESSORS=$NPROCS -DCMAKE_BUILD_TYPE=Release ..
 
 make -j $NPROCS
 

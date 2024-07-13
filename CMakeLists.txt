@@ -18,10 +18,15 @@ include(CheckLanguage)
 check_language(CUDA)
 set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
 
+# use sm_86 for Scale and native for everything else:
+if(DEFINED USE_SCALE)
+set(CMAKE_CUDA_ARCHITECTURES "86")
+else()
 if(CMAKE_VERSION VERSION_LESS "3.24.0")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=native")
 else()
 set(CMAKE_CUDA_ARCHITECTURES "native")
+endif()
 endif()
 
 # hack for using Clang as a CUDA compiler:
