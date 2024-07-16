@@ -1,4 +1,3 @@
-#include <silk/torus.hpp>
 #include <cpads/random/prng.hpp>
 #include <gtest/gtest.h>
 
@@ -9,14 +8,13 @@
 __global__ void buggy_kernel(const uint32_t *src, uint32_t *dst) {
 
     int i = blockIdx.x & 63;
-    int j = blockIdx.x >> 6;
-
+    int ls = i & 63;
+    int rs = (-i) & 63;
     uint32_t a = src[blockIdx.x * 32 + threadIdx.x];
-    uint32_t b = 0;
-    uint32_t c = 0;
-    uint32_t d = 0;
 
-    kc::shift_torus_inplace(a, b, c, d, i, j);
+    uint64_t x = a;
+    x = (x << ls) | (x >> rs);
+    a = ((uint32_t) x);
 
     dst[blockIdx.x * 32 + threadIdx.x] = a;
 }
@@ -28,11 +26,14 @@ __global__ void buggy_kernel(const uint32_t *src, uint32_t *dst) {
 __global__ void reference_kernel(const uint32_t *src, uint32_t *dst) {
 
     int i = blockIdx.x & 63;
-    int j = blockIdx.x >> 6;
-
+    int ls = i & 63;
+    int rs = (-i) & 63;
     uint32_t a = src[blockIdx.x * 32 + threadIdx.x];
 
-    kc::shift_plane_inplace(a, i, j);
+    uint32_t x2 = a;
+    a = 0;
+    if (ls < 32) { a |= (x2 << ls); }
+    if (rs < 32) { a |= (x2 >> rs); }
 
     dst[blockIdx.x * 32 + threadIdx.x] = a;
 }
