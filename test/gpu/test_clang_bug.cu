@@ -38,10 +38,9 @@ __global__ void reference_kernel(const uint32_t *src, uint32_t *dst) {
     dst[blockIdx.x * 32 + threadIdx.x] = a;
 }
 
+void run_clang_bug_test(int blocks) {
 
-TEST(Clang, Bug) {
-
-    constexpr int n = 128 * 64 * 64;
+    int n = 128 * blocks;
     uint32_t* d_a;
     uint32_t* d_b;
     uint32_t* d_c;
@@ -64,8 +63,8 @@ TEST(Clang, Bug) {
     }
 
     cudaMemcpy(d_a, h_a, n, cudaMemcpyHostToDevice);
-    reference_kernel<<<4096, 32>>>(d_a, d_b);
-    buggy_kernel<<<4096, 32>>>(d_a, d_c);
+    reference_kernel<<<blocks, 32>>>(d_a, d_b);
+    buggy_kernel<<<blocks, 32>>>(d_a, d_c);
     cudaMemcpy(h_b, d_b, n, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_c, d_c, n, cudaMemcpyDeviceToHost);
 
@@ -80,3 +79,22 @@ TEST(Clang, Bug) {
     cudaFreeHost(h_b);
     cudaFreeHost(h_c);
 }
+
+/**
+ * With 128 blocks we expose the bug because we have shift amounts
+ * outside the range [0, 63]. Even though our kernel explicitly
+ * has an "& 63" to reduce the range, this gets optimised out.
+ *
+ * My theory is that it is optimised out by virtue of being the
+ * input to a funnel shift, which has wraparound semantics, so
+ * the "& 63" is not necessary. But then at some point later one
+ * of the funnel shifts gets optimised into an ordinary shift --
+ * an optimisation that is only valid if the shift amount has
+ * been mapped into the range [0, 63].
+ */
+TEST(Clang, Bug) { run_clang_bug_test(128); }
+
+/**
+ * With 64 blocks the bug is not exposed.
+ */
+TEST(Clang, Nonbug) { run_clang_bug_test(64); }
