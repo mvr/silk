@@ -1,3 +1,24 @@
+/**
+ * This source file contains a self-contained test case, namely a
+ * kernel that compiles incorrectly with Clang but correctly on nvcc.
+ *
+ * The bug is present on at least the following versions of Clang:
+ *  -- 17.0.6
+ * when compiling for at least the following GPU compute capabilities:
+ *  -- sm_61
+ *
+ * Details are included at the bottom of the file.
+ */
+
+
+// We use the fixed-width datatypes uint32_t and uint64_t.
+#include <stdint.h>
+
+
+/**
+ * These includes are only used in host-side code; the GPU kernels
+ * themselves have no header dependencies other than <stdint.h>
+ */
 #include <cpads/random/prng.hpp>
 #include <gtest/gtest.h>
 
