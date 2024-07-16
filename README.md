@@ -68,11 +68,27 @@ Installing Silk
 
 ### Option I: running in the cloud:
 
-There is a [notebook](https://colab.research.google.com/drive/1e0olXyLAFAVE3JDHutqskYNwQiHFVrFm?usp=sharing)
-on Google Colab which allows you to run Silk in the cloud, without
-needing to have specialised hardware or install anything on your machine.
-Google Colab offers a small amount of free credit (a few hours per day
-on a Tesla T4 GPU).
+There is a Google Colab notebook which allows you to run Silk in the cloud,
+without needing to have specialised hardware or install anything on your
+machine. Google Colab offers a small amount of free credit (a few hours per
+day on a Tesla T4 GPU).
+
+Open the [notebook](https://colab.research.google.com/drive/1e0olXyLAFAVE3JDHutqskYNwQiHFVrFm?usp=sharing)
+and then clone it to your Google Drive:
+
+    File > Save a copy in Drive
+
+Then you can modify the contents of the cells and run them, following the
+instructions in the notebook. Make sure that your runtime type has a GPU
+attached (if so, then `nvidia-smi` will print information about the GPU).
+If not, then go into:
+
+    Runtime > Change runtime type
+
+to select a runtime with a GPU.
+
+The longest step (compiling Silk) will take around 5 minutes because the
+runtime only has a single CPU core, preventing parallel compilation.
 
 ### Option II: running on your computer:
 
