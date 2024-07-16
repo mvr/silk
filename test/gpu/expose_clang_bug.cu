@@ -85,6 +85,11 @@ void run_clang_bug_test(int blocks) {
  * outside the range [0, 63]. Even though our kernel explicitly
  * has an "& 63" to reduce the range, this gets optimised out.
  *
+ * If you inspect the generated SASS from each of nvcc and Clang,
+ * the only difference (up to register renaming and reordering
+ * instructions) is a "LOP32I.AND R0, R4, 0x3f;" that is present
+ * in the nvcc output but absent in the Clang output.
+ *
  * My theory is that it is optimised out by virtue of being the
  * input to a funnel shift, which has wraparound semantics, so
  * the "& 63" is not necessary. But then at some point later one
