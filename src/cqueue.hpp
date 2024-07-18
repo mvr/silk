@@ -240,62 +240,104 @@ void solution_thread_loop(SolutionQueue* solution_queue, PrintQueue* print_queue
             }
         }
 
-        std::vector<uint64_t> unk(64, 0);
+        bool accept_solution = false;
         std::vector<uint64_t> res;
+
         if (raw_solutions) {
-            unk.resize(0);
-            int H = 8 * sizeof(int64_t);
-            for (int i = 0; i < H; i++) {
-                int64_t known_live = constraints[i] & constraints[i + H] & constraints[i + 2 * H];
-                int64_t known_dead = constraints[i + 3 * H] & constraints[i + 4 * H];
-                known_live &= constraints[i + 5 * H] & constraints[i + 6 * H] & constraints[i + 7 * H];
-                
-                res.push_back(known_live);
-                unk.push_back(~known_live & ~known_dead);
-            }
+            accept_solution = true;
         } else {
             // attempt to stabilise:
             for (int r = 4; r <= 12; r++) {
                 res = kc::complete_still_life(constraints, r, true);
                 if (res.size() > 0) { break; }
             }
+            if (res.size() > 0) { accept_solution = true; }
         }
 
-        if (res.size() > 0) {
-            std::ostringstream ss;
+        if (!accept_solution) { continue; }
+        std::ostringstream ss;
 
-            // include description of solution type:
-            if (item.return_code == 0) {
-                ss << "# Found fizzle" << std::endl;
-            } else if (item.return_code == 1) {
-                // this should never happen:
-                ss << "# Found restabilisation" << std::endl;
-            } else if (item.return_code == 1000000000) {
-                ss << "# Found catalysis" << std::endl;
-            } else {
-                ss << "# Found oscillator with period " << item.return_code << std::endl;
+        // include description of solution type:
+        if (item.return_code == 0) {
+            ss << "# Found fizzle" << std::endl;
+        } else if (item.return_code == 1) {
+            // this should never happen:
+            ss << "# Found restabilisation" << std::endl;
+        } else if (item.return_code == 1000000000) {
+            ss << "# Found catalysis" << std::endl;
+        } else {
+            ss << "# Found oscillator with period " << item.return_code << std::endl;
+        }
+
+        if (raw_solutions) {
+            for (int y = 0; y < 64; y++) {
+                for (int x = 0; x < 64; x++) {
+                    // Default value to indicate an error (should never happen)
+                    char c = '!';
+                    if ((item.perturbation[y] >> x) & 1) {
+                        // On in initial perturbation, encode as '+'
+                        c = '+';
+                    } else {
+                        uint32_t cell_options = 0;
+                        for (int z = 0; z < 8; z++) {
+                            cell_options |= (uint32_t) ((~((constraints[64 * z + y] >> x)) & (uint64_t) 1) << z);
+                        }
+                        
+                        if (cell_options == 0) {
+                            // Contradiction, should never happen
+                        } else if ((cell_options & (uint32_t) 0x18) == 0) {
+                            // Background off-cell, encode as '.' for only 0 neigbours possible, and as 0-9, a-z, A-Z for other options (62 possiblities)
+                            uint32_t out_value = (cell_options & (uint32_t) 0x07) | ((cell_options & (uint32_t) 0xe0) >> 2);
+                            if (out_value == 1) {
+                                c = '.';
+                            } else if (out_value >= 2 && out_value < 12) {
+                                c = '0' + (out_value - 2);
+                            } else if (out_value >= 12 && out_value < 38) {
+                                c = 'a' + (out_value - 12);
+                            } else if (out_value >= 38) {
+                                c = 'A' + (out_value - 38);
+                            }
+                        } else if ((cell_options & (uint32_t) 0xe7) == 0) {
+                            // Background on-cell, encode as '*' for 2 neighbours, '@' for 3 neighbours and '%' for either 2 or 3 neighbours
+                            uint32_t out_value = (cell_options & (uint32_t) 0x18) >> 3;
+                            if (out_value == 1) {
+                                c = '*';
+                            } else if (out_value == 2) {
+                                c = '@';
+                            } else if (out_value == 3) {
+                                c = '%';
+                            }
+                        } else {
+                            // Undefined background cell, there could be constraints, but we don't encode them
+                            c = '?';
+                        }
+                    }
+                    ss << c;
+                }
+                ss << std::endl;
             }
-
+        } else {
             // prune:
             int miny = 0;
             int maxy = 63;
-            while ((item.perturbation[miny] == 0) && (unk[miny] == 0) && (res[miny] == 0)) { miny++; }
-            while ((item.perturbation[maxy] == 0) && (unk[maxy] == 0) && (res[maxy] == 0)) { maxy--; }
+
+            while ((item.perturbation[miny] == 0) && (res[miny] == 0)) { miny++; }
+            while ((item.perturbation[maxy] == 0) && (res[maxy] == 0)) { maxy--; }
 
             // stringify:
             for (int y = miny; y <= maxy; y++) {
                 for (int x = 0; x < 64; x++) {
-                    ss << (((item.perturbation[y] >> x) & 1) ? 'o' : (((unk[y] >> x) & 1) ? '?' : (((res[y] >> x) & 1) ? '*' : '.')));
+                    ss << (((item.perturbation[y] >> x) & 1) ? 'o' : (((res[y] >> x) & 1) ? '*' : '.'));
                 }
                 ss << std::endl;
             }
-
-            PrintMessage pm;
-            pm.contents = ss.str();
-            pm.return_code = item.return_code;
-            pm.message_type = item.message_type;
-            print_queue->enqueue(pm);
         }
+
+        PrintMessage pm;
+        pm.contents = ss.str();
+        pm.return_code = item.return_code;
+        pm.message_type = item.message_type;
+        print_queue->enqueue(pm);
     }
 
     // alert print queue that we've finished:
