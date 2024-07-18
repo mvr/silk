@@ -112,6 +112,12 @@ and compile the code, tuned for whatever GPU architecture you have:
 
     ./recompile.sh
 
+After compiling, you can run the automated tests with:
+
+    ./run_unit_tests.sh
+
+to ensure that everything compiled and runs correctly.
+
 Running Silk
 ------------
 
