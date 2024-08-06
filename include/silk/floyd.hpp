@@ -57,26 +57,36 @@ _DI_ int floyd_cycle(
             // advance by one generation:
             perturbation = not_stable;
             generation += 1;
-            if (hh::ballot_32(perturbation & ad0.x) != 0) {
-                perturbed_time++;
+
+            bool recovered = hh::ballot_32(perturbation & ad0.x) == 0;
+
+            if (!recovered) {
                 // This also registers that the reaction has started
                 // mvrnote: this doesn't detect smothering interactions!
                 restored_time = 0;
             } else {
-                perturbed_time = 0;
                 if (restored_time != ~0)
                     restored_time += 1;
             }
+
+            if (restored_time != ~0 && restored_time >= min_stable) {
+                generation = 1000000000;
+                break;
+            }
+
+            // Start the reaction timer
+            if (!recovered && perturbed_time == ~0)
+                perturbed_time = 0;
+
+            if (perturbed_time != ~0)
+                perturbed_time++;
+
+            if (!recovered && perturbed_time >= max_perturbed_time) {
+              generation = -1;
+              break; // Reaction has gone too long
+            }
+
             bump_counter<CollectMetrics>(metrics, METRIC_FLOYD_ITER);
-        }
-
-        if (restored_time != ~0 && restored_time >= min_stable) {
-            generation = 1000000000;
-            break;
-        }
-
-        if (perturbed_time >= max_perturbed_time) {
-          generation = -1; break; // reaction has gone too long
         }
 
         {

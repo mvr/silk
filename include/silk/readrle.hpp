@@ -139,7 +139,7 @@ inline void swizzle_subproblem(uint32_t* res, const uint64_t* constraints, const
     res[1024] = 1;
     res[1026] = px;
     res[1027] = py;
-    res[1030] = 0;
+    res[1030] = ~0;
     res[1031] = ~0;
 
     for (int y = 0; y < 32; y++) {
