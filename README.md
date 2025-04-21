@@ -6,6 +6,17 @@ Silk: a CUDA drifter searcher
 underlying algorithm, modulo a few tweaks, to CUDA in order to benefit
 from the much greater parallelism present on GPUs.
 
+As an example of the type of thing that Silk can discover, here is a
+complicated glider eater that popped out of a search. The glider is
+converted into a signal that propagates throughout the structure before
+fizzling out, returning exactly to its original state.
+
+![Complicated glider eater](./docs/fizzle4.gif)
+
+The aim is to be able to discover circuitry similar to this but capable
+of turning and splitting signals and ideally converting signals back
+into gliders.
+
 Silk's algorithm is similar to the
 [DPLL algorithm](https://en.wikipedia.org/wiki/DPLL_algorithm) in that
 it performs a tree search on unknown Boolean variables and applies unit
