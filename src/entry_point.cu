@@ -247,12 +247,7 @@ struct SilkGPU {
         }
     }
 
-    void run_main_kernel(const float4* nnue, int blocks_to_launch, int open_problems, int min_period, int max_perturbed_time, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int batches = 4) {
-
-        // if we are generating training data, then explore more
-        // (75% random + 25% NNUE); otherwise, mostly follow the
-        // neural network (5% random + 95% NNUE).
-        double epsilon = (make_data) ? 0.75 : 0.05;
+    void run_main_kernel(const float4* nnue, int blocks_to_launch, int open_problems, int min_period, int max_perturbed_time, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, double epsilon, int batches = 4) {
 
         // for batch 0, we know exactly the number of blocks:
         int batch_size = blocks_to_launch;
@@ -354,7 +349,7 @@ struct SilkGPU {
     }
 };
 
-void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period, int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, ProblemQueue *master_queue) {
+void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period, int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, ProblemQueue *master_queue, double epsilon) {
 
     int elapsed_iters = 0;
     int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
@@ -371,7 +366,7 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
         batch_size &= 0x7ffff000;
 
-        silk.run_main_kernel(nnue, problems, open_problems, min_report_period, max_perturbed_time,  min_stable, batch_size, make_data, status_queue);
+        silk.run_main_kernel(nnue, problems, open_problems, min_report_period, max_perturbed_time,  min_stable, batch_size, make_data, status_queue, epsilon);
 
         open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
@@ -434,7 +429,7 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
 void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, SolutionQueue *status_queue,
     int stream_id, int device_id, size_t prb_capacity, const float4* nnue, bool make_data, int active_width,
     int active_height, int active_pop, const kc::ProblemHolder *ph, int min_report_period,
-    int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches) {
+    int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, double epsilon) {
 
     cudaSetDevice(device_id);
 
@@ -455,7 +450,7 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
         problem_queue->wait_dequeue(item);
         if (item.message_type == MESSAGE_KILL_THREAD) { break; }
         silk.inject_problems(item.problem_data);
-        run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, max_perturbed_time, min_stable, approx_batches, master_queue);
+        run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, max_perturbed_time, min_stable, approx_batches, master_queue, epsilon);
 
         {
             // tell master thread that we've finished a batch:
@@ -505,6 +500,11 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
     std::vector<std::pair<uint64_t, float4*>> device_infos;
     int num_streams = 0;
 
+    bool make_data = dataset_filename.size() > 0;
+
+    // if we cannot load the NNUE, then use it with 0% probability:
+    double epsilon = 1.0;
+
     // ***** LOAD NNUE AND COPY TO DEVICES *****
     {
         uint4* nnue_h;
@@ -514,12 +514,17 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
         FILE *fptr = fopen(nnue_filename.c_str(), "r");
 
         if (fptr == nullptr) {
-            std::cerr << "Error: failed to load NNUE from file " << nnue_filename << std::endl;
-            return 1;
-        }
+            std::cerr << "Warning: failed to load NNUE from file " << nnue_filename << std::endl;
+            memset(nnue_h, 0, NNUE_BYTES);
+        } else {
+            // if we are generating training data, then explore more
+            // (75% random + 25% NNUE); otherwise, mostly follow the
+            // neural network (5% random + 95% NNUE).
+            epsilon = (make_data) ? 0.75 : 0.05;
 
-        fread(nnue_h, 512, 7473, fptr);
-        fclose(fptr);
+            fread(nnue_h, 512, 7473, fptr);
+            fclose(fptr);
+        }
 
         std::cerr << "Info: probing " << num_devices << " devices..." << std::endl;
 
@@ -551,8 +556,6 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     // sort descending, so that the devices with greater memory come first:
     std::sort(device_infos.rbegin(), device_infos.rend());
-
-    bool make_data = dataset_filename.size() > 0;
 
     // ***** ESTABLISH COMMUNICATIONS *****
 
@@ -588,7 +591,8 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
                 const float4* nnue = x.second;
                 std::cerr << "    -- creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
                 gpu_threads.emplace_back(gpu_thread_loop, &problem_queue, &master_queue, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
-                                        active_width, active_height, active_pop, &ph, min_report_period, max_perturbed_time, min_stable, &approx_batches);
+                                        active_width, active_height, active_pop, &ph, min_report_period, max_perturbed_time, min_stable, &approx_batches,
+                                        epsilon);
             }
         }
     }
