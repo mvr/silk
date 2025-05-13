@@ -49,4 +49,22 @@ mkdir -p "$TARGET_DIR/cxxopts/include"
 cp cxxopts/LICEN* "$TARGET_DIR/cxxopts"
 cp cxxopts/include/cxxopts.hpp "$TARGET_DIR/cxxopts/include"
 
+grep -A 100 -B 1 "c[o]pied into" minisilk.sh > "$TARGET_DIR/imsilk.sh"
 
+exit 0
+
+#!/bin/bash
+# this gets copied into imsilk.sh
+
+cd -- "$( dirname -- "${BASH_SOURCE[0]}" )"
+
+mkdir -p ~/.msilk
+rm -r ~/.msilk/minisilk
+
+set -e
+
+cp -r . ~/.msilk/minisilk
+cd ~/.msilk/minisilk
+
+bash recompile.sh
+bash run_unit_tests.sh
