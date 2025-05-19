@@ -66,7 +66,7 @@ _DI_ int floyd_cycle(
                         uint32_t c4 = kc::shift_plane<false, -1>(changed);
                         changed |= (c3 | c4);
                     }
-                    uint32_t disallowed = not_stable &~ changed;
+                    uint32_t disallowed = ad0.x & not_stable &~ changed;
                     if (hh::ballot_32(disallowed)) {
                         generation = -1; break; // contradiction obtained
                     }
