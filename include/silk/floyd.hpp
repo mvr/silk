@@ -57,17 +57,19 @@ _DI_ int floyd_cycle(
 
             if (mcsd > 0) {
                 uint32_t changed = perturbation ^ not_stable;
-                for (int i = 0; i < mcsd; i++) {
-                    uint32_t c1 = kc::shift_plane<true, 1>(changed);
-                    uint32_t c2 = kc::shift_plane<true, -1>(changed);
-                    changed |= (c1 | c2);
-                    uint32_t c3 = kc::shift_plane<false, 1>(changed);
-                    uint32_t c4 = kc::shift_plane<false, -1>(changed);
-                    changed |= (c3 | c4);
-                }
-                uint32_t disallowed = not_stable &~ changed;
-                if (hh::ballot_32(disallowed)) {
-                    generation = -1; break; // contradiction obtained
+                if (hh::ballot_32(changed)) {
+                    for (int i = 0; i < mcsd; i++) {
+                        uint32_t c1 = kc::shift_plane<true, 1>(changed);
+                        uint32_t c2 = kc::shift_plane<true, -1>(changed);
+                        changed |= (c1 | c2);
+                        uint32_t c3 = kc::shift_plane<false, 1>(changed);
+                        uint32_t c4 = kc::shift_plane<false, -1>(changed);
+                        changed |= (c3 | c4);
+                    }
+                    uint32_t disallowed = not_stable &~ changed;
+                    if (hh::ballot_32(disallowed)) {
+                        generation = -1; break; // contradiction obtained
+                    }
                 }
             }
 
