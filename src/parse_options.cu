@@ -34,6 +34,7 @@ int main(int argc, char* argv[]) {
     ("s,min-stable", "minimum unclean catalyst stable time before report", cxxopts::value<int>()->default_value("999999999"))
     ("e,exempt-existing", "whether to ignore constraints on ZOI of input catalyst cells", cxxopts::value<bool>()->default_value("false"))
     ("r,raw-solutions", "don't stabilise solutions, print with unknown cells instead", cxxopts::value<bool>()->default_value("false"))
+    ("c,max-cell-stationary-distance", "maximum distance that an active, unchanging cell may be from changing cells", cxxopts::value<int>()->default_value("-1"))
 
     // help
     ("h,help", "Print usage");
@@ -64,6 +65,7 @@ int main(int argc, char* argv[]) {
     int min_stable = result["min-stable"].as<int>();
     bool exempt_existing = result["exempt-existing"].as<bool>();
     bool raw_solutions = result["raw-solutions"].as<bool>();
+    int max_cell_stationary_distance = result["max-cell-stationary-distance"].as<int>();
 
     std::cerr << "Info: Silk invoked as " << silk_filename << std::endl;
 
@@ -80,7 +82,8 @@ int main(int argc, char* argv[]) {
         min_stable,
         exempt_existing,
         raw_solutions,
-        dataset_filename
+        dataset_filename,
+        max_cell_stationary_distance
     );
 
     return return_code;

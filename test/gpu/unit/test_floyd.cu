@@ -25,7 +25,7 @@ __global__ void floyd_kernel(const uint32_t *input, int32_t *output) {
 
     int result = kc::floyd_cycle<false, false, false>(ad0, ad1, ad2, al2, al3, ad4, ad5, ad6,
         stator, exempt, perturbation, px, py, perturbed_time, restore_time,
-        28, 28, 784, 999999999, 999999999);
+        28, 28, 784, 999999999, 999999999, -1);
 
     if (threadIdx.x == 0) {
         output[blockIdx.x] = result;

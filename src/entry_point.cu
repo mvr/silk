@@ -247,7 +247,7 @@ struct SilkGPU {
         }
     }
 
-    void run_main_kernel(const float4* nnue, int blocks_to_launch, int open_problems, int min_period, int max_perturbed_time, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, double epsilon, int batches = 4) {
+    void run_main_kernel(const float4* nnue, int blocks_to_launch, int open_problems, int min_period, int max_perturbed_time, int min_stable, int max_batch_size, bool make_data, SolutionQueue* status_queue, int mcsd, double epsilon, int batches = 4) {
 
         // for batch 0, we know exactly the number of blocks:
         int batch_size = blocks_to_launch;
@@ -261,7 +261,7 @@ struct SilkGPU {
                 ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
                 prb_size, srb_size, hrb_size,
                 max_width, max_height, max_pop, max_perturbed_time, min_stable, rollout_gens,
-                min_period, epsilon
+                min_period, mcsd, epsilon
             );
 
             if (make_data) {
@@ -349,7 +349,7 @@ struct SilkGPU {
     }
 };
 
-void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period, int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, ProblemQueue *master_queue, double epsilon) {
+void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint64_t* perturbation, SolutionQueue* status_queue, bool make_data, int min_report_period, int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, ProblemQueue *master_queue, int mcsd, double epsilon) {
 
     int elapsed_iters = 0;
     int open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
@@ -366,7 +366,7 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
         int batch_size = hh::max(lower_batch_size, hh::min(medium_batch_size, upper_batch_size));
         batch_size &= 0x7ffff000;
 
-        silk.run_main_kernel(nnue, problems, open_problems, min_report_period, max_perturbed_time,  min_stable, batch_size, make_data, status_queue, epsilon);
+        silk.run_main_kernel(nnue, problems, open_problems, min_report_period, max_perturbed_time, min_stable, batch_size, make_data, status_queue, mcsd, epsilon);
 
         open_problems = silk.host_counters[COUNTER_WRITING_HEAD] - silk.host_counters[COUNTER_READING_HEAD];
 
@@ -429,7 +429,7 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
 void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, SolutionQueue *status_queue,
     int stream_id, int device_id, size_t prb_capacity, const float4* nnue, bool make_data, int active_width,
     int active_height, int active_pop, const kc::ProblemHolder *ph, int min_report_period,
-    int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, double epsilon) {
+    int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, int mcsd, double epsilon) {
 
     cudaSetDevice(device_id);
 
@@ -450,7 +450,7 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
         problem_queue->wait_dequeue(item);
         if (item.message_type == MESSAGE_KILL_THREAD) { break; }
         silk.inject_problems(item.problem_data);
-        run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, max_perturbed_time, min_stable, approx_batches, master_queue, epsilon);
+        run_main_loop(stream_id, nnue, silk, &(ph->perturbation[0]), status_queue, make_data, min_report_period, max_perturbed_time, min_stable, approx_batches, master_queue, mcsd, epsilon);
 
         {
             // tell master thread that we've finished a batch:
@@ -468,7 +468,7 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
     }
 }
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, bool raw_solutions, std::string dataset_filename) {
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, bool raw_solutions, std::string dataset_filename, int mcsd) {
 
     #define REPORT_EXIT(X) if (hh::reportCudaError(X)) { std::cerr << "Error: Silk aborting due to irrecoverable GPU error." << std::endl; return 1; }
 
@@ -592,7 +592,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
                 std::cerr << "    -- creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
                 gpu_threads.emplace_back(gpu_thread_loop, &problem_queue, &master_queue, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
                                         active_width, active_height, active_pop, &ph, min_report_period, max_perturbed_time, min_stable, &approx_batches,
-                                        epsilon);
+                                        mcsd, epsilon);
             }
         }
     }

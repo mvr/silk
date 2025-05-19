@@ -32,6 +32,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
         // miscellaneous:
         int min_period,
+        int max_cell_stationary_distance,
         uint32_t epsilon_threshold
     ) {
 
@@ -137,7 +138,8 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         // advance and perform cycle detection:
         return_code = kc::floyd_cycle<true, HasStator, HasExempt>(
             ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, exempt, perturbation, px, py,
-            perturbed_time, restored_time, max_width, max_height, max_pop, max_perturbed_time, min_stable, metrics
+            perturbed_time, restored_time, max_width, max_height, max_pop, max_perturbed_time,
+            min_stable, max_cell_stationary_distance, metrics
         );
 
         if (return_code == -3) { max_rounds = 1; }
@@ -301,6 +303,7 @@ void launch_main_kernel(
 
     // miscellaneous:
     int min_period,
+    int max_cell_stationary_distance,
     double epsilon
 ) {
 
@@ -311,7 +314,7 @@ void launch_main_kernel(
     #define KERNEL_ARGS ctx, prb, srb, smd, global_counters, nnue, \
         freenodes, hrb, prb_size, srb_size, hrb_size, max_width, \
         max_height, max_pop, max_perturbed_time, min_stable, \
-        rollout_gens, min_period, epsilon_threshold
+        rollout_gens, min_period, max_cell_stationary_distance, epsilon_threshold
 
     // run the kernel:
     if (HasStator) {
