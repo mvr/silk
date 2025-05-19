@@ -60,6 +60,9 @@ cd -- "$( dirname -- "${BASH_SOURCE[0]}" )"
 
 mkdir -p ~/.msilk
 rm -r ~/.msilk/minisilk
+rm ~/.msilk/minisilk.tar.gz
+
+tar -czvf ~/.msilk/minisilk.tar.gz .
 
 set -e
 
