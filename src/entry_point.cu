@@ -3,6 +3,77 @@
 #include <thread>
 #include <atomic>
 
+_HD_ uint64_t bloom_bytes_from_mib(int bloom_filter_mib) {
+    if (bloom_filter_mib <= 0) { return 0; }
+
+    uint64_t requested_bytes = ((uint64_t) bloom_filter_mib) << 20;
+    uint64_t chunks = requested_bytes >> 7;
+    if (chunks == 0) { chunks = 1; }
+
+    uint64_t pow2_chunks = 1;
+    while ((pow2_chunks << 1) <= chunks) { pow2_chunks <<= 1; }
+    return pow2_chunks << 7;
+}
+
+uint64_t estimate_stream_bytes(uint64_t prb_capacity, bool make_data, int bloom_filter_mib) {
+    uint64_t hrb_capacity = prb_capacity >> 4;
+    if (hrb_capacity < 8192) { hrb_capacity = 8192; }
+
+    uint64_t bytes = 0;
+    bytes += 512 * 2; // ctx
+    bytes += ((uint64_t) (PROBLEM_PAIR_BYTES >> 1)) * prb_capacity; // prb
+    bytes += 4096ull * 16384ull; // srb
+    bytes += 4ull * 16384ull; // smd
+    bytes += 512; // global counters
+    bytes += 2ull * prb_capacity; // freenodes
+    bytes += 8ull * hrb_capacity; // hrb
+    bytes += 8ull * prb_capacity; // heap
+    bytes += bloom_bytes_from_mib(bloom_filter_mib); // bloom
+
+    if (bloom_filter_mib > 0) {
+        // Conservative headroom for allocator overhead/fragmentation
+        // when each stream also carries a large Bloom filter.
+        bytes += 384ull << 20;
+    } else {
+        // Even without Bloom, leave room for runtime allocator overhead.
+        bytes += 320ull << 20;
+    }
+
+    if (make_data) {
+        bytes += 32ull * 1048576ull; // dataset
+        bytes += 8ull * 1048576ull; // predictions
+    }
+
+    return bytes;
+}
+
+void fit_stream_capacities(std::vector<size_t> &stream_capacities, uint64_t available_bytes, bool make_data, int bloom_filter_mib) {
+    while (true) {
+        uint64_t required_bytes = 0;
+        for (auto&& prb_capacity : stream_capacities) {
+            if (prb_capacity) {
+                required_bytes += estimate_stream_bytes(prb_capacity, make_data, bloom_filter_mib);
+            }
+        }
+
+        if (required_bytes <= available_bytes) { return; }
+
+        if (stream_capacities[1] > 0) {
+            stream_capacities[1] >>= 1;
+            if (stream_capacities[1] < 65536) { stream_capacities[1] = 0; }
+            continue;
+        }
+
+        if (stream_capacities[0] > 65536) {
+            stream_capacities[0] >>= 1;
+            continue;
+        }
+
+        stream_capacities[0] = 0;
+        return;
+    }
+}
+
 
 __global__ void srb_to_prb(const uint4* srb, uint4* prb, const uint32_t* freenodes, const uint64_t* global_counters, uint32_t prb_size) {
 
@@ -149,6 +220,30 @@ struct SilkGPU {
         bloom_reset_base = 0;
         bloom_reset_threshold = 0;
 
+        if (bloom_filter_mib > 0) {
+            bloom_bytes = bloom_bytes_from_mib(bloom_filter_mib);
+            uint64_t chunks = bloom_bytes >> 7;
+            bloom_chunk_mask = (uint32_t) (chunks - 1);
+            bloom_reset_threshold = (bloom_bytes << 3) / 46;
+            if (bloom_reset_threshold == 0) { bloom_reset_threshold = 1; }
+
+            cudaError_t alloc_status = cudaMalloc((void**) &bloom_filter, bloom_bytes);
+            if (alloc_status == cudaSuccess) {
+                cudaMemset(bloom_filter, 0, bloom_bytes);
+                bloom_enabled = true;
+            } else {
+                std::cerr << "Warning: failed to allocate Bloom filter (" << (bloom_bytes >> 20)
+                          << " MiB) on this stream: " << cudaGetErrorString(alloc_status) << std::endl;
+                bloom_filter = nullptr;
+                bloom_chunk_mask = 0;
+                bloom_bytes = 0;
+                bloom_reset_threshold = 0;
+                // Clear sticky CUDA error state so optional Bloom failure
+                // does not look like a fatal stream-level allocation error.
+                cudaGetLastError();
+            }
+        }
+
         uint64_t hrb_capacity = prb_capacity >> 4;
         if (hrb_capacity < 8192) { hrb_capacity = 8192; }
 
@@ -193,33 +288,6 @@ struct SilkGPU {
         rollout_gens = 6;
         drb_hwm = 0;
         last_solution_count = 0;
-
-        if (bloom_filter_mib > 0) {
-            uint64_t requested_bytes = ((uint64_t) bloom_filter_mib) << 20;
-            uint64_t chunks = requested_bytes >> 7;
-            if (chunks == 0) { chunks = 1; }
-
-            uint64_t pow2_chunks = 1;
-            while ((pow2_chunks << 1) <= chunks) { pow2_chunks <<= 1; }
-
-            bloom_bytes = pow2_chunks << 7;
-            bloom_chunk_mask = (uint32_t) (pow2_chunks - 1);
-            bloom_reset_threshold = (bloom_bytes << 3) / 46;
-            if (bloom_reset_threshold == 0) { bloom_reset_threshold = 1; }
-
-            cudaError_t alloc_status = cudaMalloc((void**) &bloom_filter, bloom_bytes);
-            if (alloc_status == cudaSuccess) {
-                cudaMemset(bloom_filter, 0, bloom_bytes);
-                bloom_enabled = true;
-            } else {
-                std::cerr << "Warning: failed to allocate Bloom filter (" << (bloom_bytes >> 20)
-                          << " MiB) on this stream: " << cudaGetErrorString(alloc_status) << std::endl;
-                bloom_filter = nullptr;
-                bloom_chunk_mask = 0;
-                bloom_bytes = 0;
-                bloom_reset_threshold = 0;
-            }
-        }
     }
 
     ~SilkGPU() {
@@ -595,7 +663,6 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
                 REPORT_EXIT(cudaMalloc((void**) &nnue_d, NNUE_BYTES))
                 REPORT_EXIT(cudaMemcpy(nnue_d, nnue_h, NNUE_BYTES, cudaMemcpyHostToDevice))
                 device_infos.emplace_back((free_mem << 32) | ((uint64_t) i), nnue_d);
-                num_streams += (free_mem >= 512) ? 2 : 1;
             }
             REPORT_EXIT(cudaDeviceSynchronize())
         }
@@ -623,10 +690,18 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
 
     std::atomic<int64_t> approx_batches = 1;
 
-    std::cerr << "Info: creating " << num_streams << " streams..." << std::endl;
+    std::cerr << "Info: creating GPU streams..." << std::endl;
 
     for (auto&& x : device_infos) {
-        size_t free_megabytes = x.first >> 32;
+        int device_id = ((uint32_t) x.first);
+        const float4* nnue = x.second;
+
+        REPORT_EXIT(cudaSetDevice(device_id))
+        size_t free_bytes = 0;
+        size_t total_bytes_ignored = 0;
+        REPORT_EXIT(cudaMemGetInfo(&free_bytes, &total_bytes_ignored))
+
+        uint64_t free_megabytes = free_bytes >> 20;
         std::vector<size_t> stream_capacities(2);
 
         if (free_megabytes < 512) {
@@ -638,11 +713,20 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
             stream_capacities[1] = 4096 << hh::constexpr_log2(free_megabytes / 18);
         }
 
+        uint64_t available_bytes = free_bytes;
+        constexpr uint64_t reserve_bytes = 512ull << 20;
+        if (available_bytes > reserve_bytes) { available_bytes -= reserve_bytes; }
+
+        fit_stream_capacities(stream_capacities, available_bytes, make_data, bloom_filter_mib);
+
+        if ((stream_capacities[0] == 0) && (stream_capacities[1] == 0)) {
+            std::cerr << "    -- skipping device " << device_id << " due to insufficient free memory." << std::endl;
+            continue;
+        }
+
         for (auto&& prb_capacity : stream_capacities) {
             if (prb_capacity > 0) {
                 int stream_id = gpu_threads.size();
-                int device_id = ((uint32_t) x.first);
-                const float4* nnue = x.second;
                 std::cerr << "    -- creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
                 gpu_threads.emplace_back(gpu_thread_loop, &problem_queue, &master_queue, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
                                         active_width, active_height, active_pop, &ph, min_report_period, max_perturbed_time, min_stable, &approx_batches,
@@ -650,6 +734,20 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
             }
         }
     }
+
+    num_streams = gpu_threads.size();
+
+    if (num_streams == 0) {
+        std::cerr << "Error: no streams could be created with the current memory budget." << std::endl;
+        for (auto&& x : device_infos) {
+            REPORT_EXIT(cudaSetDevice(((uint32_t) x.first)))
+            REPORT_EXIT(cudaDeviceSynchronize())
+            REPORT_EXIT(cudaFree(x.second))
+        }
+        return 1;
+    }
+
+    std::cerr << "Info: created " << num_streams << " stream(s)." << std::endl;
 
     std::thread status_thread(status_thread_loop, num_streams, num_cadical_threads, &status_queue, &solution_queue, &print_queue, dataset_filename);
     std::vector<std::thread> cadical_threads;
