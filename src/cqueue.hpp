@@ -451,7 +451,7 @@ void print_thread_loop(int num_writers, PrintQueue* print_queue) {
         replace_number(aelluvial, "[F]", totals[METRIC_CATALYSIS]);
         replace_number(aelluvial, "[G]", totals[METRIC_DEADEND]);
         replace_number(aelluvial, "[H]", periodic);
-        replace_number(aelluvial, "[I]", indeterminate - totals[METRIC_HARDBRANCH]);
+        replace_number(aelluvial, "[I]", totals[METRIC_DEDUP]);
         replace_number(aelluvial, "[J]", totals[METRIC_RESTAB]);
         replace_number(aelluvial, "[K]", totals[METRIC_OSCILLATOR]);
         replace_number(aelluvial, "[L]", totals[METRIC_FIZZLE]);

@@ -20,6 +20,7 @@
 #define METRIC_NNUE       15
 
 #define METRIC_CATALYSIS  16
+#define METRIC_DEDUP      17
 
 // pseudometrics:
 #define METRIC_PRB_SIZE   31

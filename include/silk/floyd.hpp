@@ -15,7 +15,8 @@ namespace kc {
 template<bool CollectMetrics, bool HasStator, bool HasExempt>
 _DI_ int floyd_cycle(
         uint4 &ad0, uint4 &ad1, uint4 &ad2, uint4 &al2, uint4 &al3, uint4 &ad4, uint4 &ad5, uint4 &ad6, uint4 &stator, uint4 &exempt,
-        uint32_t &perturbation, uint32_t &px, uint32_t &py, uint32_t &perturbed_time, uint32_t &restored_time, int max_width, int max_height, int max_pop, int max_perturbed_time, int min_stable, uint32_t* metrics = nullptr
+        uint32_t &perturbation, uint32_t &px, uint32_t &py, uint32_t &perturbed_time, uint32_t &restored_time,
+        int max_width, int max_height, int max_pop, int max_perturbed_time, int min_stable, int mcsd, uint32_t* metrics = nullptr, bool* made_progress = nullptr
     ) {
 
     // a half-speed version of perturbation for Floyd's algorithm:
@@ -24,6 +25,7 @@ _DI_ int floyd_cycle(
     uint32_t qy = py;
 
     bool in_cycle = false;
+    bool advanced = false;
     int generation = 0;
 
     while (true) {
@@ -54,9 +56,28 @@ _DI_ int floyd_cycle(
                 generation = 0; break; // fizzle
             }
 
+            if (mcsd > 0) {
+                uint32_t changed = perturbation ^ not_stable;
+                if (hh::ballot_32(changed)) {
+                    for (int i = 0; i < mcsd; i++) {
+                        uint32_t c1 = kc::shift_plane<true, 1>(changed);
+                        uint32_t c2 = kc::shift_plane<true, -1>(changed);
+                        changed |= (c1 | c2);
+                        uint32_t c3 = kc::shift_plane<false, 1>(changed);
+                        uint32_t c4 = kc::shift_plane<false, -1>(changed);
+                        changed |= (c3 | c4);
+                    }
+                    uint32_t disallowed = ad0.x & not_stable &~ changed;
+                    if (hh::ballot_32(disallowed)) {
+                        generation = -1; break; // contradiction obtained
+                    }
+                }
+            }
+
             // advance by one generation:
             perturbation = not_stable;
             generation += 1;
+            advanced = true;
 
             bool recovered = hh::ballot_32(perturbation & ad0.x) == 0;
 
@@ -179,6 +200,7 @@ _DI_ int floyd_cycle(
         generation = 1000000000;
     }
 
+    if (made_progress != nullptr) { *made_progress = advanced; }
     return generation;
 }
 
