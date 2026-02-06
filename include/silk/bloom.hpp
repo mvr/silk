@@ -1,4 +1,5 @@
 #pragma once
+#include "torus.hpp"
 #include <cpads/core.hpp>
 
 namespace kc {
@@ -51,6 +52,63 @@ _DI_ uint32_t sparse_random(uint64_t hash, int k) {
     warp_bit_permute(x, ((uint32_t) (hash >> 32)));
     warp_bit_permute(x, ((uint32_t) hash));
     return x;
+}
+
+/**
+ * Radius-2 neighbourhood with the four corners removed (21 cells).
+ */
+_DI_ uint32_t zoi21(uint32_t perturbation) {
+    uint32_t hm2 = kc::shift_plane<false, -2>(perturbation);
+    uint32_t hm1 = kc::shift_plane<false, -1>(perturbation);
+    uint32_t hp1 = kc::shift_plane<false,  1>(perturbation);
+    uint32_t hp2 = kc::shift_plane<false,  2>(perturbation);
+
+    uint32_t near = hm2 | hm1 | perturbation | hp1 | hp2;
+    uint32_t far = hm1 | perturbation | hp1;
+
+    return near
+        | kc::shift_plane<true,  1>(near)
+        | kc::shift_plane<true, -1>(near)
+        | kc::shift_plane<true,  2>(far)
+        | kc::shift_plane<true, -2>(far);
+}
+
+/**
+ * Hash perturbation together with masked stable information in zoi21.
+ */
+_DI_ uint64_t dedup_hash(
+        uint32_t perturbation,
+        uint32_t ad0, uint32_t ad1, uint32_t ad2, uint32_t al2,
+        uint32_t al3, uint32_t ad4, uint32_t ad5, uint32_t ad6
+    ) {
+
+    uint32_t mask = zoi21(perturbation);
+    uint64_t x = (((uint64_t) perturbation) << 32) | mask;
+
+    uint64_t p01 = (((uint64_t) (mask & ad0)) << 32) | (mask & ad1);
+    uint64_t p23 = (((uint64_t) (mask & ad2)) << 32) | (mask & al2);
+    uint64_t p45 = (((uint64_t) (mask & al3)) << 32) | (mask & ad4);
+    uint64_t p67 = (((uint64_t) (mask & ad5)) << 32) | (mask & ad6);
+
+    x = hh::fibmix(x ^ 0x8577d6d46a5f60c3ull);
+    x = hh::fibmix(x + p01 + 0x243f6a8885a308d3ull);
+    x = hh::fibmix(x + p23 + 0x13198a2e03707344ull);
+    x = hh::fibmix(x + p45 + 0xa4093822299f31d0ull);
+    x = hh::fibmix(x + p67 + 0x082efa98ec4e6c89ull);
+
+    return warp_hash(x);
+}
+
+/**
+ * Returns true if the hash was already present in the filter.
+ */
+_DI_ bool bloom_test_and_set(uint32_t* bloom_filter, uint32_t bloom_chunk_mask, uint64_t hash) {
+    uint32_t sparse = sparse_random(hash, 32);
+    uint64_t lane0_hash = hh::shuffle_32(hash, 0);
+    uint32_t chunk = ((uint32_t) (lane0_hash >> 32)) & bloom_chunk_mask;
+    uint32_t index = (chunk << 5) + (threadIdx.x & 31);
+    uint32_t prev = hh::atomic_or(bloom_filter + index, sparse);
+    return (hh::ballot_32((sparse &~ prev) != 0) == 0);
 }
 
 }

@@ -102,6 +102,7 @@ struct SilkGPU {
     float* predictions;
     uint32_t* freenodes;
     uint64_t* hrb;
+    uint32_t* bloom_filter;
     uint4* heap;
 
     // host-side pointers:
@@ -126,16 +127,28 @@ struct SilkGPU {
 
     uint64_t drb_hwm;
     uint64_t last_solution_count;
+    uint64_t bloom_reset_base;
+    uint64_t bloom_reset_threshold;
+    uint64_t bloom_bytes;
+    uint32_t bloom_chunk_mask;
 
     uint64_t perturbation[64];
     bool has_data;
+    bool bloom_enabled;
     bool HasStator;
     bool HasExempt;
 
     SilkGPU(uint64_t prb_capacity, uint64_t srb_capacity, uint64_t drb_capacity,
-            int active_width, int active_height, int active_pop) {
+            int active_width, int active_height, int active_pop, int bloom_filter_mib) {
 
         has_data = false;
+        bloom_enabled = false;
+        bloom_filter = nullptr;
+        bloom_chunk_mask = 0;
+        bloom_bytes = 0;
+        bloom_reset_base = 0;
+        bloom_reset_threshold = 0;
+
         uint64_t hrb_capacity = prb_capacity >> 4;
         if (hrb_capacity < 8192) { hrb_capacity = 8192; }
 
@@ -180,6 +193,33 @@ struct SilkGPU {
         rollout_gens = 6;
         drb_hwm = 0;
         last_solution_count = 0;
+
+        if (bloom_filter_mib > 0) {
+            uint64_t requested_bytes = ((uint64_t) bloom_filter_mib) << 20;
+            uint64_t chunks = requested_bytes >> 7;
+            if (chunks == 0) { chunks = 1; }
+
+            uint64_t pow2_chunks = 1;
+            while ((pow2_chunks << 1) <= chunks) { pow2_chunks <<= 1; }
+
+            bloom_bytes = pow2_chunks << 7;
+            bloom_chunk_mask = (uint32_t) (pow2_chunks - 1);
+            bloom_reset_threshold = (bloom_bytes << 3) / 46;
+            if (bloom_reset_threshold == 0) { bloom_reset_threshold = 1; }
+
+            cudaError_t alloc_status = cudaMalloc((void**) &bloom_filter, bloom_bytes);
+            if (alloc_status == cudaSuccess) {
+                cudaMemset(bloom_filter, 0, bloom_bytes);
+                bloom_enabled = true;
+            } else {
+                std::cerr << "Warning: failed to allocate Bloom filter (" << (bloom_bytes >> 20)
+                          << " MiB) on this stream: " << cudaGetErrorString(alloc_status) << std::endl;
+                bloom_filter = nullptr;
+                bloom_chunk_mask = 0;
+                bloom_bytes = 0;
+                bloom_reset_threshold = 0;
+            }
+        }
     }
 
     ~SilkGPU() {
@@ -191,6 +231,7 @@ struct SilkGPU {
         cudaFree(freenodes);
         cudaFree(heap);
         cudaFree(hrb);
+        if (bloom_filter != nullptr) { cudaFree(bloom_filter); }
         cudaFreeHost(host_counters);
         cudaFreeHost(host_freenodes);
         cudaFreeHost(host_srb);
@@ -258,8 +299,8 @@ struct SilkGPU {
 
             // run the kernel:
             launch_main_kernel(HasStator, HasExempt, batch_size,
-                ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb,
-                prb_size, srb_size, hrb_size,
+                ctx, prb, srb, smd, global_counters, nnue, freenodes, hrb, bloom_filter,
+                prb_size, srb_size, hrb_size, bloom_chunk_mask,
                 max_width, max_height, max_pop, max_perturbed_time, min_stable, rollout_gens,
                 min_period, mcsd, epsilon
             );
@@ -330,6 +371,14 @@ struct SilkGPU {
 
         // this is synchronous, so awaits the completion of the kernels:
         cudaMemcpy(host_counters, global_counters, 512, cudaMemcpyDeviceToHost);
+
+        if (bloom_enabled) {
+            uint64_t bloom_inserts = host_counters[COUNTER_BLOOM_INSERTS];
+            if (bloom_inserts >= bloom_reset_base + bloom_reset_threshold) {
+                cudaMemset(bloom_filter, 0, bloom_bytes);
+                bloom_reset_base = bloom_inserts;
+            }
+        }
 
         if (make_data) {
             if (host_counters[COUNTER_READING_HEAD] >= drb_hwm + 2 * drb_size) {
@@ -429,7 +478,7 @@ void run_main_loop(int stream_id, const float4* nnue, SilkGPU &silk, const uint6
 void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, SolutionQueue *status_queue,
     int stream_id, int device_id, size_t prb_capacity, const float4* nnue, bool make_data, int active_width,
     int active_height, int active_pop, const kc::ProblemHolder *ph, int min_report_period,
-    int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, int mcsd, double epsilon) {
+    int max_perturbed_time, int min_stable, std::atomic<int64_t> *approx_batches, int mcsd, double epsilon, int bloom_filter_mib) {
 
     cudaSetDevice(device_id);
 
@@ -440,7 +489,7 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
     size_t srb_capacity = 16384;
     size_t drb_capacity = make_data ? 1048576 : 0;
 
-    SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop);
+    SilkGPU silk(prb_capacity, srb_capacity, drb_capacity, active_width, active_height, active_pop, bloom_filter_mib);
 
     silk.set_ctx(stator, exempt);
 
@@ -468,9 +517,14 @@ void gpu_thread_loop(ProblemQueue *problem_queue, ProblemQueue *master_queue, So
     }
 }
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, bool raw_solutions, std::string dataset_filename, int mcsd) {
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, bool raw_solutions, std::string dataset_filename, int mcsd, int bloom_filter_mib) {
 
     #define REPORT_EXIT(X) if (hh::reportCudaError(X)) { std::cerr << "Error: Silk aborting due to irrecoverable GPU error." << std::endl; return 1; }
+
+    if (bloom_filter_mib < 0) {
+        std::cerr << "Warning: negative Bloom filter size specified; disabling Bloom dedup." << std::endl;
+        bloom_filter_mib = 0;
+    }
 
     // ***** LOAD PROBLEM *****
 
@@ -592,7 +646,7 @@ int silk_main(int active_width, int active_height, int active_pop, std::string i
                 std::cerr << "    -- creating stream " << stream_id << " on device " << device_id << " with ring buffer size " << prb_capacity << std::endl;
                 gpu_threads.emplace_back(gpu_thread_loop, &problem_queue, &master_queue, &status_queue, stream_id, device_id, prb_capacity, nnue, make_data,
                                         active_width, active_height, active_pop, &ph, min_report_period, max_perturbed_time, min_stable, &approx_batches,
-                                        mcsd, epsilon);
+                                        mcsd, epsilon, bloom_filter_mib);
             }
         }
     }

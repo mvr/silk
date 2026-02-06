@@ -16,7 +16,7 @@ template<bool CollectMetrics, bool HasStator, bool HasExempt>
 _DI_ int floyd_cycle(
         uint4 &ad0, uint4 &ad1, uint4 &ad2, uint4 &al2, uint4 &al3, uint4 &ad4, uint4 &ad5, uint4 &ad6, uint4 &stator, uint4 &exempt,
         uint32_t &perturbation, uint32_t &px, uint32_t &py, uint32_t &perturbed_time, uint32_t &restored_time,
-        int max_width, int max_height, int max_pop, int max_perturbed_time, int min_stable, int mcsd, uint32_t* metrics = nullptr
+        int max_width, int max_height, int max_pop, int max_perturbed_time, int min_stable, int mcsd, uint32_t* metrics = nullptr, bool* made_progress = nullptr
     ) {
 
     // a half-speed version of perturbation for Floyd's algorithm:
@@ -25,6 +25,7 @@ _DI_ int floyd_cycle(
     uint32_t qy = py;
 
     bool in_cycle = false;
+    bool advanced = false;
     int generation = 0;
 
     while (true) {
@@ -76,6 +77,7 @@ _DI_ int floyd_cycle(
             // advance by one generation:
             perturbation = not_stable;
             generation += 1;
+            advanced = true;
             if (hh::ballot_32(perturbation & ad0.x) != 0) {
                 perturbed_time++;
                 // This also registers that the reaction has started
@@ -188,6 +190,7 @@ _DI_ int floyd_cycle(
         generation = 1000000000;
     }
 
+    if (made_progress != nullptr) { *made_progress = advanced; }
     return generation;
 }
 

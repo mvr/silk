@@ -11,6 +11,7 @@
 #define COUNTER_HEAP_ELEMENTS 37
 
 #define COUNTER_SOLUTION_HEAD 38
+#define COUNTER_BLOOM_INSERTS 39
 
 // We use 4480 bytes (280 uint4s) to represent a pair of problems:
 //  -- bytes [0:4096]: stable information
@@ -25,7 +26,7 @@
 
 #define NNUE_BYTES 3826176
 
-int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, bool raw_solutions, std::string dataset_filename, int mcsd);
+int silk_main(int active_width, int active_height, int active_pop, std::string input_filename, std::string nnue_filename, int num_cadical_threads, int min_report_period, int max_perturbed_time, int min_stable, bool exempt_existing, bool raw_solutions, std::string dataset_filename, int mcsd, int bloom_filter_mib);
 
 void enheap_then_deheap(const uint64_t* hrb, uint64_t* global_counters, uint4* heap, int hrb_size, int max_elements, uint32_t* free_nodes, int prb_size);
 
@@ -45,11 +46,13 @@ void launch_main_kernel(
     const float4* nnue,
     const uint32_t* freenodes,
     uint64_t* hrb,
+    uint32_t* bloom_filter,
 
     // buffer sizes:
     uint32_t prb_size,
     uint32_t srb_size,
     uint32_t hrb_size,
+    uint32_t bloom_chunk_mask,
 
     // problem parameters:
     int max_width,

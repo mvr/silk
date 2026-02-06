@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include <silk/mainloop.hpp>
+#include <silk/bloom.hpp>
 
 /**
  * Main kernel that does the majority of the work.
@@ -16,11 +17,13 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         const float4* nnue,
         const uint32_t* freenodes,
         uint64_t* hrb,
+        uint32_t* bloom_filter,
 
         // buffer sizes:
         uint32_t prb_size,
         uint32_t srb_size,
         uint32_t hrb_size,
+        uint32_t bloom_chunk_mask,
 
         // problem parameters:
         int max_width,
@@ -125,6 +128,7 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     int return_code = -3;
     int max_rounds = 2;
+    bool advanced_this_problem = false;
 
     // main loop:
     while (return_code == -3) {
@@ -136,13 +140,26 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
         if (contradiction) { return_code = -1; break; }
 
         // advance and perform cycle detection:
+        bool advanced_this_call = false;
         return_code = kc::floyd_cycle<true, HasStator, HasExempt>(
             ad0, ad1, ad2, al2, al3, ad4, ad5, ad6, stator, exempt, perturbation, px, py,
             perturbed_time, restored_time, max_width, max_height, max_pop, max_perturbed_time,
-            min_stable, max_cell_stationary_distance, metrics
+            min_stable, max_cell_stationary_distance, metrics, &advanced_this_call
         );
+        advanced_this_problem = advanced_this_problem || advanced_this_call;
 
         if (return_code == -3) { max_rounds = 1; }
+    }
+
+    if ((return_code == -2) && (bloom_filter != nullptr) && advanced_this_problem && (hh::ballot_32(perturbation) != 0)) {
+        uint64_t dedup = kc::dedup_hash(perturbation, ad0.x, ad1.x, ad2.x, al2.x, al3.x, ad4.x, ad5.x, ad6.x);
+        bool duplicate = kc::bloom_test_and_set(bloom_filter, bloom_chunk_mask, dedup);
+        if (duplicate) {
+            return_code = -4;
+            kc::bump_counter<true>(metrics, METRIC_DEDUP);
+        } else if (threadIdx.x == 0) {
+            hh::atomic_add(global_counters + COUNTER_BLOOM_INSERTS, 1);
+        }
     }
 
     if (return_code == -1) { kc::bump_counter<true>(metrics, METRIC_DEADEND); }
@@ -162,8 +179,8 @@ __global__ void __launch_bounds__(32, 16) computecellorbackup(
 
     __syncthreads();
 
-    if (return_code >= -1) {
-        // we have found a solution or a contradiction
+    if ((return_code >= -1) || (return_code == -4)) {
+        // we have found a terminal outcome (solution, contradiction, or dedup)
 
         // flush metrics:
         hh::atomic_add(global_counters + threadIdx.x, metrics[threadIdx.x]);
@@ -287,11 +304,13 @@ void launch_main_kernel(
     const float4* nnue,
     const uint32_t* freenodes,
     uint64_t* hrb,
+    uint32_t* bloom_filter,
 
     // buffer sizes:
     uint32_t prb_size,
     uint32_t srb_size,
     uint32_t hrb_size,
+    uint32_t bloom_chunk_mask,
 
     // problem parameters:
     int max_width,
@@ -312,9 +331,10 @@ void launch_main_kernel(
     uint32_t epsilon_threshold = ((uint32_t) (epsilon * 4194304.0));
 
     #define KERNEL_ARGS ctx, prb, srb, smd, global_counters, nnue, \
-        freenodes, hrb, prb_size, srb_size, hrb_size, max_width, \
-        max_height, max_pop, max_perturbed_time, min_stable, \
-        rollout_gens, min_period, max_cell_stationary_distance, epsilon_threshold
+        freenodes, hrb, bloom_filter, prb_size, srb_size, hrb_size, \
+        bloom_chunk_mask, max_width, max_height, max_pop, \
+        max_perturbed_time, min_stable, rollout_gens, min_period, \
+        max_cell_stationary_distance, epsilon_threshold
 
     // run the kernel:
     if (HasStator) {
